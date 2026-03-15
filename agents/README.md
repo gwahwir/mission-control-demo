@@ -84,7 +84,7 @@ receive ──► process ──► respond ──► END
 | `process` | Uppercases the input: `ECHO: HELLO WORLD` |
 | `respond` | Writes the final output string to state |
 
-**Agent Card** (served at `/.well-known/agent.json`):
+**Agent Card** (served at `/.well-known/agent-card.json`):
 
 | Field | Value |
 |---|---|
@@ -120,7 +120,7 @@ The agent starts on **http://localhost:8001**.
 Verify it is up:
 
 ```bash
-curl http://localhost:8001/.well-known/agent.json
+curl http://localhost:8001/.well-known/agent-card.json
 ```
 
 ### Run with Docker

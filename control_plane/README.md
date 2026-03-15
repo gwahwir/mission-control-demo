@@ -83,7 +83,7 @@ submitted ──► working ──► completed
 
 ## Agent Registry
 
-On startup the registry fetches `/.well-known/agent.json` from every configured agent URL. It marks agents `online` or `offline` and re-polls every 30 seconds (configurable). If an agent is offline, `POST /agents/{id}/tasks` returns `503`.
+On startup the registry fetches `/.well-known/agent-card.json` from every configured agent URL. It marks agents `online` or `offline` and re-polls every 30 seconds (configurable). If an agent is offline, `POST /agents/{id}/tasks` returns `503`.
 
 ---
 

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -c \"from agents.echo.server import app; print\\(''Import OK:'', app.title\\)\")",
+      "Bash(.venv/Scripts/python -c \":*)",
+      "Bash(taskkill //F //FI 'WINDOWTITLE eq *agents.echo*')",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 4020)",
+      "Bash(xargs -I{} taskkill //F //PID {})",
+      "Bash(npm create:*)",
+      "Bash(where bun:*)",
+      "Bash(where npx:*)",
+      "Bash(where node:*)",
+      "Read(//c/Program Files/**)",
+      "Bash(cmd.exe //c \"where node\")",
+      "Bash(winget install:*)",
+      "Bash(export PATH=\"/c/Program Files/nodejs:$PATH\")",
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

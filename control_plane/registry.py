@@ -171,7 +171,7 @@ class AgentRegistry:
 
     async def _refresh_instance(self, type_id: str, instance: AgentInstance) -> None:
         try:
-            r = await self._client.get(f"{instance.url}/.well-known/agent.json")
+            r = await self._client.get(f"{instance.url}/.well-known/agent-card.json")
             r.raise_for_status()
             instance.card = r.json()
             instance.status = AgentStatus.ONLINE

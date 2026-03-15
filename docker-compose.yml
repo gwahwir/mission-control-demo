@@ -41,7 +41,30 @@ services:
     environment:
       - LOG_LEVEL=INFO
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/.well-known/agent.json').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/.well-known/agent-card.json').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Summarizer Agent ───────────────────────────────────────────────────────
+  # Consumes echo-agent output, then summarizes with OpenAI
+  summarizer:
+    build:
+      context: .
+      dockerfile: Dockerfile.summarizer
+    ports:
+      - "8002:8002"
+    environment:
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - UPSTREAM_AGENT_URL=http://echo-agent:8001
+    depends_on:
+      echo-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/.well-known/agent-card.json').raise_for_status()"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,7 +73,7 @@ services:
   # ── Control Plane ──────────────────────────────────────────────────────────
   # Scale with: docker compose up --scale echo-agent=3
   # Add more agent types via AGENT_URLS:
-  #   echo-agent@http://echo-agent:8001,summariser@http://summariser:8002
+  #   echo-agent@http://echo-agent:8001,summarizer@http://summarizer:8002
   control-plane:
     build:
       context: .
@@ -59,11 +82,13 @@ services:
       - "8000:8000"
     environment:
       - LOG_LEVEL=INFO
-      - AGENT_URLS=echo-agent@http://echo-agent:8001
+      - AGENT_URLS=echo-agent@http://echo-agent:8001,summarizer@http://summarizer:8002
       - DATABASE_URL=postgresql://mc:mc_password@postgres:5432/missioncontrol
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       echo-agent:
+        condition: service_healthy
+      summarizer:
         condition: service_healthy
       postgres:
         condition: service_healthy
