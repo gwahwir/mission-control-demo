@@ -1,8 +1,18 @@
 import { useState } from "react";
+import { TextInput, Select, Table, Title, Group, Badge, Text } from "@mantine/core";
+
+const stateColors = {
+  completed: "green",
+  working: "yellow",
+  submitted: "gray",
+  canceled: "red",
+  failed: "red",
+  "input-required": "violet",
+};
 
 export default function TaskHistory({ tasks, onSelectTask }) {
   const [search, setSearch] = useState("");
-  const [filterState, setFilterState] = useState("");
+  const [filterState, setFilterState] = useState(null);
 
   const filtered = tasks.filter((t) => {
     const matchesSearch =
@@ -14,87 +24,83 @@ export default function TaskHistory({ tasks, onSelectTask }) {
     return matchesSearch && matchesState;
   });
 
-  const stateColor = (state) => {
-    const colors = {
-      completed: "text-emerald-400",
-      working: "text-amber-400",
-      submitted: "text-slate-400",
-      canceled: "text-red-400",
-      failed: "text-red-400",
-      "input-required": "text-purple-400",
-    };
-    return colors[state] || "text-slate-400";
-  };
-
   return (
-    <section>
-      <h2 className="text-xl font-bold text-white mb-4">Task History</h2>
+    <div>
+      <Title order={3} mb="md">
+        Task History
+      </Title>
 
-      <div className="flex gap-3 mb-3 flex-wrap">
-        <input
-          type="text"
+      <Group mb="md">
+        <TextInput
           placeholder="Search tasks..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[200px] rounded-md bg-slate-800 border border-slate-700 text-white px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
+          onChange={(e) => setSearch(e.currentTarget.value)}
+          style={{ flex: 1, minWidth: 200 }}
         />
-        <select
+        <Select
+          placeholder="All states"
+          clearable
+          data={[
+            { value: "completed", label: "Completed" },
+            { value: "working", label: "Working" },
+            { value: "submitted", label: "Submitted" },
+            { value: "canceled", label: "Cancelled" },
+            { value: "failed", label: "Failed" },
+          ]}
           value={filterState}
-          onChange={(e) => setFilterState(e.target.value)}
-          className="rounded-md bg-slate-800 border border-slate-700 text-white px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
-        >
-          <option value="">All states</option>
-          <option value="completed">Completed</option>
-          <option value="working">Working</option>
-          <option value="submitted">Submitted</option>
-          <option value="canceled">Cancelled</option>
-          <option value="failed">Failed</option>
-        </select>
-      </div>
+          onChange={setFilterState}
+        />
+      </Group>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-400 text-xs uppercase">
-            <tr>
-              <th className="px-4 py-2">Task ID</th>
-              <th className="px-4 py-2">Agent</th>
-              <th className="px-4 py-2">Input</th>
-              <th className="px-4 py-2">State</th>
-              <th className="px-4 py-2">Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((task) => (
-              <tr
-                key={task.task_id}
-                onClick={() => onSelectTask(task)}
-                className="border-t border-slate-700 hover:bg-slate-800/50 cursor-pointer"
-              >
-                <td className="px-4 py-2 font-mono text-xs text-slate-400">
+      <Table striped highlightOnHover>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Task ID</Table.Th>
+            <Table.Th>Agent</Table.Th>
+            <Table.Th>Input</Table.Th>
+            <Table.Th>State</Table.Th>
+            <Table.Th>Time</Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {filtered.map((task) => (
+            <Table.Tr
+              key={task.task_id}
+              onClick={() => onSelectTask(task)}
+              style={{ cursor: "pointer" }}
+            >
+              <Table.Td>
+                <Text size="xs" ff="monospace">
                   {task.task_id.slice(0, 8)}...
-                </td>
-                <td className="px-4 py-2 text-slate-300">{task.agent_id}</td>
-                <td className="px-4 py-2 text-slate-300 max-w-[200px] truncate">
-                  {task.input_text}
-                </td>
-                <td className={`px-4 py-2 font-medium ${stateColor(task.state)}`}>
+                </Text>
+              </Table.Td>
+              <Table.Td>{task.agent_id}</Table.Td>
+              <Table.Td maw={200} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {task.input_text}
+              </Table.Td>
+              <Table.Td>
+                <Badge color={stateColors[task.state] || "gray"} variant="light" size="sm">
                   {task.state}
-                </td>
-                <td className="px-4 py-2 text-slate-500 text-xs">
+                </Badge>
+              </Table.Td>
+              <Table.Td>
+                <Text size="xs" c="dimmed">
                   {new Date(task.created_at * 1000).toLocaleString()}
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-4 text-center text-slate-500">
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          ))}
+          {filtered.length === 0 && (
+            <Table.Tr>
+              <Table.Td colSpan={5}>
+                <Text ta="center" c="dimmed" py="md">
                   No tasks found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          )}
+        </Table.Tbody>
+      </Table>
+    </div>
   );
 }

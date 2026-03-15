@@ -1,45 +1,54 @@
+import { Card, Group, Text, Badge, Stack } from "@mantine/core";
+
 export default function AgentCard({ agent, onSelect }) {
   const isOnline = agent.status === "online";
 
   return (
-    <div
+    <Card
+      shadow="sm"
+      padding="md"
+      withBorder
       onClick={() => onSelect(agent)}
-      className="cursor-pointer rounded-lg border border-slate-700 bg-slate-800 p-4 hover:border-indigo-500 transition-colors"
+      style={{ cursor: "pointer" }}
     >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-lg font-semibold text-white">{agent.name}</h3>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            isOnline
-              ? "bg-emerald-500/10 text-emerald-400"
-              : "bg-red-500/10 text-red-400"
-          }`}
+      <Group justify="space-between" mb="xs">
+        <Text fw={600} size="lg">
+          {agent.name}
+        </Text>
+        <Badge
+          color={isOnline ? "green" : "red"}
+          variant="light"
+          size="sm"
+          circle={false}
+          leftSection={
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                backgroundColor: isOnline ? "var(--mantine-color-green-5)" : "var(--mantine-color-red-5)",
+                display: "inline-block",
+              }}
+            />
+          }
         >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              isOnline ? "bg-emerald-400" : "bg-red-400"
-            }`}
-          />
           {agent.status}
-        </span>
-      </div>
+        </Badge>
+      </Group>
 
-      <p className="text-sm text-slate-400 mb-3 line-clamp-2">
+      <Text size="sm" c="dimmed" lineClamp={2} mb="sm">
         {agent.description}
-      </p>
+      </Text>
 
       {agent.skills?.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <Group gap="xs">
           {agent.skills.map((skill) => (
-            <span
-              key={skill.id}
-              className="rounded-md bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
-            >
+            <Badge key={skill.id} variant="default" size="xs">
               {skill.name}
-            </span>
+            </Badge>
           ))}
-        </div>
+        </Group>
       )}
-    </div>
+    </Card>
   );
 }

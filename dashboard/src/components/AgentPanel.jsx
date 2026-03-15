@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SimpleGrid, Title, Text, Alert } from "@mantine/core";
 import { fetchAgents } from "../hooks/useApi";
 import AgentCard from "./AgentCard";
 
@@ -18,27 +19,25 @@ export default function AgentPanel({ onSelectAgent }) {
   }, []);
 
   return (
-    <section>
-      <h2 className="text-xl font-bold text-white mb-4">Agents</h2>
+    <div>
+      <Title order={3} mb="md">
+        Agents
+      </Title>
       {error && (
-        <p className="text-red-400 text-sm mb-2">
+        <Alert color="red" mb="sm">
           Failed to load agents: {error}
-        </p>
+        </Alert>
       )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
         {agents.map((agent) => (
-          <AgentCard
-            key={agent.id}
-            agent={agent}
-            onSelect={onSelectAgent}
-          />
+          <AgentCard key={agent.id} agent={agent} onSelect={onSelectAgent} />
         ))}
-        {agents.length === 0 && !error && (
-          <p className="text-slate-500 text-sm col-span-full">
-            No agents registered.
-          </p>
-        )}
-      </div>
-    </section>
+      </SimpleGrid>
+      {agents.length === 0 && !error && (
+        <Text size="sm" c="dimmed">
+          No agents registered.
+        </Text>
+      )}
+    </div>
   );
 }

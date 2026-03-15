@@ -1,4 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
+import {
+  AppShell,
+  Group,
+  Title,
+  Text,
+  Tabs,
+  Badge,
+  ActionIcon,
+  Box,
+} from "@mantine/core";
 import AgentPanel from "./components/AgentPanel";
 import TaskLauncher from "./components/TaskLauncher";
 import TaskBoard from "./components/TaskBoard";
@@ -44,71 +54,72 @@ function App() {
     setSelectedTask(null);
   };
 
+  const onlineCount = agents.filter((a) => a.status === "online").length;
+
   return (
-    <div className="min-h-screen bg-slate-950">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+    <AppShell header={{ height: 60 }} padding="md">
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group>
+            <Box
+              w={32}
+              h={32}
+              style={{
+                borderRadius: "var(--mantine-radius-md)",
+                background: "var(--mantine-color-indigo-6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
               MC
-            </div>
-            <h1 className="text-lg font-bold text-white">Mission Control</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">
-              {agents.filter((a) => a.status === "online").length}/
-              {agents.length} agents online
-            </span>
-          </div>
-        </div>
-      </header>
+            </Box>
+            <Title order={4}>Mission Control</Title>
+          </Group>
+          <Group gap="xs">
+            <Badge variant="dot" color={onlineCount > 0 ? "green" : "red"} size="lg">
+              {onlineCount}/{agents.length} agents online
+            </Badge>
+          </Group>
+        </Group>
+      </AppShell.Header>
 
-      {/* Main content */}
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-8">
-        <AgentPanel onSelectAgent={() => {}} />
+      <AppShell.Main>
+        <Box maw={1200} mx="auto">
+          <Box mb="xl">
+            <AgentPanel onSelectAgent={() => {}} />
+          </Box>
 
-        <TaskLauncher agents={agents} onTaskCreated={handleTaskCreated} />
+          <Box mb="xl">
+            <TaskLauncher agents={agents} onTaskCreated={handleTaskCreated} />
+          </Box>
 
-        {/* Tab navigation */}
-        <div className="flex gap-1 border-b border-slate-800">
-          <button
-            onClick={() => setTab("board")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === "board"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-white"
-            }`}
-          >
-            Task Board
-          </button>
-          <button
-            onClick={() => setTab("history")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === "history"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-white"
-            }`}
-          >
-            History
-          </button>
-        </div>
+          <Tabs value={tab} onChange={setTab}>
+            <Tabs.List mb="md">
+              <Tabs.Tab value="board">Task Board</Tabs.Tab>
+              <Tabs.Tab value="history">History</Tabs.Tab>
+            </Tabs.List>
 
-        {tab === "board" && (
-          <TaskBoard tasks={tasks} onSelectTask={setSelectedTask} />
-        )}
-        {tab === "history" && (
-          <TaskHistory tasks={tasks} onSelectTask={setSelectedTask} />
-        )}
-      </main>
+            <Tabs.Panel value="board">
+              <TaskBoard tasks={tasks} onSelectTask={setSelectedTask} />
+            </Tabs.Panel>
 
-      {/* Task detail drawer */}
+            <Tabs.Panel value="history">
+              <TaskHistory tasks={tasks} onSelectTask={setSelectedTask} />
+            </Tabs.Panel>
+          </Tabs>
+        </Box>
+      </AppShell.Main>
+
       <TaskDetailDrawer
         task={selectedTask}
         onClose={() => setSelectedTask(null)}
         onCancelled={handleTaskCancelled}
       />
-    </div>
+    </AppShell>
   );
 }
 

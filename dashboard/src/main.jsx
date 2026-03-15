@@ -1,10 +1,22 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider, createTheme } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
+import "@mantine/core/styles.css";
+import "@mantine/notifications/styles.css";
+import App from "./App.jsx";
 
-createRoot(document.getElementById('root')).render(
+const theme = createTheme({
+  primaryColor: "indigo",
+  fontFamily: "system-ui, -apple-system, sans-serif",
+  defaultRadius: "md",
+});
+
+createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
-  </StrictMode>,
-)
+    <MantineProvider theme={theme} defaultColorScheme="dark">
+      <Notifications position="top-right" />
+      <App />
+    </MantineProvider>
+  </StrictMode>
+);
