@@ -3,7 +3,7 @@
 Defines the shared data model (TaskState, TaskRecord) and two
 implementations:
 
-* ``TaskStore``   — in-memory (default, no dependencies)
+* ``TaskStore``         — in-memory (default, no dependencies)
 * ``PostgresTaskStore`` — asyncpg-backed (enabled via DATABASE_URL)
 
 Both share the same async interface so routes.py is backend-agnostic.
@@ -37,6 +37,7 @@ class TaskRecord:
 
     task_id: str
     agent_id: str
+    instance_url: str = ""          # exact agent instance that is running this task
     state: TaskState = TaskState.SUBMITTED
     input_text: str = ""
     output_text: str = ""
@@ -48,6 +49,7 @@ class TaskRecord:
         return {
             "task_id": self.task_id,
             "agent_id": self.agent_id,
+            "instance_url": self.instance_url,
             "state": self.state.value,
             "input_text": self.input_text,
             "output_text": self.output_text,
@@ -57,13 +59,13 @@ class TaskRecord:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> TaskRecord:
-        """Reconstruct a TaskRecord from a database row dict."""
         a2a_task = row.get("a2a_task", "{}")
         if isinstance(a2a_task, str):
             a2a_task = json.loads(a2a_task)
         return cls(
             task_id=row["task_id"],
             agent_id=row["agent_id"],
+            instance_url=row.get("instance_url", ""),
             state=TaskState(row["state"]),
             input_text=row.get("input_text", ""),
             output_text=row.get("output_text", ""),
@@ -94,9 +96,7 @@ class TaskStore:
         return self._tasks.get(task_id)
 
     async def list_all(self) -> list[TaskRecord]:
-        return sorted(
-            self._tasks.values(), key=lambda t: t.created_at, reverse=True
-        )
+        return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
 
     async def list_by_agent(self, agent_id: str) -> list[TaskRecord]:
         return [t for t in await self.list_all() if t.agent_id == agent_id]
@@ -108,44 +108,43 @@ class TaskStore:
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS tasks (
-    task_id     TEXT PRIMARY KEY,
-    agent_id    TEXT        NOT NULL,
-    state       TEXT        NOT NULL,
-    input_text  TEXT        NOT NULL DEFAULT '',
-    output_text TEXT        NOT NULL DEFAULT '',
-    created_at  FLOAT8      NOT NULL,
-    updated_at  FLOAT8      NOT NULL,
-    a2a_task    TEXT        NOT NULL DEFAULT '{}'
+    task_id      TEXT PRIMARY KEY,
+    agent_id     TEXT   NOT NULL,
+    instance_url TEXT   NOT NULL DEFAULT '',
+    state        TEXT   NOT NULL,
+    input_text   TEXT   NOT NULL DEFAULT '',
+    output_text  TEXT   NOT NULL DEFAULT '',
+    created_at   FLOAT8 NOT NULL,
+    updated_at   FLOAT8 NOT NULL,
+    a2a_task     TEXT   NOT NULL DEFAULT '{}'
 );
 """
 
 _UPSERT = """
 INSERT INTO tasks
-    (task_id, agent_id, state, input_text, output_text, created_at, updated_at, a2a_task)
+    (task_id, agent_id, instance_url, state, input_text, output_text, created_at, updated_at, a2a_task)
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (task_id) DO UPDATE SET
-    state       = EXCLUDED.state,
-    output_text = EXCLUDED.output_text,
-    updated_at  = EXCLUDED.updated_at,
-    a2a_task    = EXCLUDED.a2a_task;
+    state        = EXCLUDED.state,
+    output_text  = EXCLUDED.output_text,
+    updated_at   = EXCLUDED.updated_at,
+    a2a_task     = EXCLUDED.a2a_task;
 """
 
 
 class PostgresTaskStore:
     """asyncpg-backed task store.
 
-    Enabled automatically when DATABASE_URL is set in the environment.
-    Call ``await store.init(database_url)`` during app startup and
-    ``await store.close()`` during shutdown.
+    Activated when DATABASE_URL is set. Call ``await store.init(url)``
+    during app startup and ``await store.close()`` during shutdown.
     """
 
     def __init__(self) -> None:
         self._pool = None
 
     async def init(self, database_url: str) -> None:
-        import asyncpg  # imported lazily so the rest of the app works without it
-
+        import asyncpg
         self._pool = await asyncpg.create_pool(dsn=database_url, min_size=2, max_size=10)
         async with self._pool.acquire() as conn:
             await conn.execute(_CREATE_TABLE)
@@ -161,6 +160,7 @@ class PostgresTaskStore:
                 _UPSERT,
                 record.task_id,
                 record.agent_id,
+                record.instance_url,
                 record.state.value,
                 record.input_text,
                 record.output_text,
@@ -171,24 +171,17 @@ class PostgresTaskStore:
 
     async def get(self, task_id: str) -> TaskRecord | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM tasks WHERE task_id = $1", task_id
-            )
-        if row is None:
-            return None
-        return TaskRecord.from_row(dict(row))
+            row = await conn.fetchrow("SELECT * FROM tasks WHERE task_id = $1", task_id)
+        return TaskRecord.from_row(dict(row)) if row else None
 
     async def list_all(self) -> list[TaskRecord]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT * FROM tasks ORDER BY created_at DESC"
-            )
+            rows = await conn.fetch("SELECT * FROM tasks ORDER BY created_at DESC")
         return [TaskRecord.from_row(dict(r)) for r in rows]
 
     async def list_by_agent(self, agent_id: str) -> list[TaskRecord]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM tasks WHERE agent_id = $1 ORDER BY created_at DESC",
-                agent_id,
+                "SELECT * FROM tasks WHERE agent_id = $1 ORDER BY created_at DESC", agent_id
             )
         return [TaskRecord.from_row(dict(r)) for r in rows]
