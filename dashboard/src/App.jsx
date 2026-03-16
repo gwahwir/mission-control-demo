@@ -15,7 +15,7 @@ import TaskBoard from "./components/TaskBoard";
 import TaskHistory from "./components/TaskHistory";
 import TaskDetailDrawer from "./components/TaskDetailDrawer";
 import AgentFlowDiagram from "./components/AgentFlowDiagram";
-import { fetchAgents, fetchGraph, fetchTasks } from "./hooks/useApi";
+import { fetchAgents, fetchGraph, fetchTasks, deleteTask, deleteAllTasks } from "./hooks/useApi";
 
 function App() {
   const [agents, setAgents] = useState([]);
@@ -61,6 +61,24 @@ function App() {
       )
     );
     setSelectedTask(null);
+  };
+
+  const handleDeleteTask = (taskId) => {
+    deleteTask(taskId)
+      .then(() => {
+        setTasks((prev) => prev.filter((t) => t.task_id !== taskId));
+        if (selectedTask?.task_id === taskId) setSelectedTask(null);
+      })
+      .catch(() => {});
+  };
+
+  const handleClearAll = () => {
+    deleteAllTasks()
+      .then(() => {
+        setTasks([]);
+        setSelectedTask(null);
+      })
+      .catch(() => {});
   };
 
   const onlineCount = agents.filter((a) => a.status === "online").length;
@@ -122,7 +140,12 @@ function App() {
             </Tabs.Panel>
 
             <Tabs.Panel value="history">
-              <TaskHistory tasks={tasks} onSelectTask={setSelectedTask} />
+              <TaskHistory
+                tasks={tasks}
+                onSelectTask={setSelectedTask}
+                onDeleteTask={handleDeleteTask}
+                onClearAll={handleClearAll}
+              />
             </Tabs.Panel>
           </Tabs>
         </Box>

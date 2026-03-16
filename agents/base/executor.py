@@ -179,12 +179,14 @@ class LangGraphA2AExecutor(AgentExecutor, CancellableMixin):
                 final=True,
             )
         except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
             await self._emit_status(
                 event_queue,
                 task_id,
                 context_id,
                 TaskState.failed,
-                f"Error: {exc}",
+                f"{type(exc).__name__}: {exc}\n\n{tb}",
                 final=True,
             )
         finally:

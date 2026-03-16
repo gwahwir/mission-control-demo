@@ -36,6 +36,22 @@ export async function fetchTasks() {
   return res.json();
 }
 
+export async function deleteTask(taskId) {
+  const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete task");
+  return res.json();
+}
+
+export async function deleteAllTasks() {
+  const res = await fetch(`${API_BASE}/tasks`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to clear tasks");
+  return res.json();
+}
+
 export function subscribeToTask(taskId, onMessage) {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${window.location.host}/ws/tasks/${taskId}`);

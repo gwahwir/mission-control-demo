@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Drawer, Stack, Text, Badge, Code, Button, Group } from "@mantine/core";
+import { Drawer, Stack, Text, Badge, Code, Button, Group, Alert } from "@mantine/core";
 import { cancelTask } from "../hooks/useApi";
 
 const stateColors = {
@@ -72,6 +72,14 @@ export default function TaskDetailDrawer({ task, onClose, onCancelled }) {
             {task.state}
           </Badge>
         </div>
+
+        {task.error && (
+          <Alert color="red" title="Error" variant="light">
+            <Code block style={{ whiteSpace: "pre-wrap", background: "transparent", color: "inherit" }}>
+              {task.error}
+            </Code>
+          </Alert>
+        )}
 
         <div>
           <Text size="xs" c="dimmed" tt="uppercase" fw={500}>
