@@ -39,16 +39,18 @@ class A2AClient:
             "messageId": str(uuid.uuid4()),
             "parts": [{"kind": "text", "text": text}],
         }
-        if task_id:
-            message["taskId"] = task_id
         if context_id:
             message["contextId"] = context_id
+
+        params: dict[str, Any] = {"message": message}
+        if task_id:
+            params["id"] = task_id
 
         payload = {
             "jsonrpc": "2.0",
             "id": self._next_id(),
             "method": "message/send",
-            "params": {"message": message},
+            "params": params,
         }
         r = await self._client.post(f"{self._base_url}/", json=payload)
         r.raise_for_status()

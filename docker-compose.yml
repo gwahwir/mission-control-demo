@@ -31,24 +31,7 @@ services:
       retries: 10
       start_period: 5s
 
-  # ── Echo Agent ─────────────────────────────────────────────────────────────
-  echo-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    ports:
-      - "8001:8001"
-    environment:
-      - LOG_LEVEL=INFO
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/.well-known/agent-card.json').raise_for_status()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # ── Summarizer Agent ───────────────────────────────────────────────────────
-  # Consumes echo-agent output, then summarizes with OpenAI
+  # ── Summarizer Agent (started before echo-agent — echo forwards to it) ────
   summarizer:
     build:
       context: .
@@ -59,12 +42,28 @@ services:
       - LOG_LEVEL=INFO
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      - UPSTREAM_AGENT_URL=http://echo-agent:8001
-    depends_on:
-      echo-agent:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/.well-known/agent-card.json').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Echo Agent ─────────────────────────────────────────────────────────────
+  echo-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    ports:
+      - "8001:8001"
+    environment:
+      - LOG_LEVEL=INFO
+      - DOWNSTREAM_AGENT_URL=http://summarizer:8002
+    depends_on:
+      summarizer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/.well-known/agent-card.json').raise_for_status()"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -82,7 +81,7 @@ services:
       - "8000:8000"
     environment:
       - LOG_LEVEL=INFO
-      - AGENT_URLS=echo-agent@http://echo-agent:8001,summarizer@http://summarizer:8002
+      - AGENT_URLS=echo-agent@http://echo-agent-1:8001,summarizer@http://summarizer-1:8002
       - DATABASE_URL=postgresql://mc:mc_password@postgres:5432/missioncontrol
       - REDIS_URL=redis://redis:6379/0
     depends_on:

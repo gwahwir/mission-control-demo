@@ -4,11 +4,8 @@ Run with:
     python -m agents.summarizer.server
 
 Environment variables:
-    OPENAI_API_KEY       – Required. Your OpenAI API key.
-    OPENAI_MODEL         – Model to use (default: gpt-4o-mini).
-    UPSTREAM_AGENT_URL   – A2A URL of the agent whose output is summarized
-                           (e.g. http://echo-agent:8001). If empty, the
-                           summarizer works directly on the user's input.
+    OPENAI_API_KEY  – Required. Your OpenAI API key.
+    OPENAI_MODEL    – Model to use (default: gpt-4o-mini).
 """
 
 from __future__ import annotations
@@ -27,9 +24,8 @@ AGENT_PORT = 8002
 agent_card = AgentCard(
     name="Summarizer Agent",
     description=(
-        "Consumes another agent's output via A2A, then uses OpenAI to "
-        "produce a concise summary. Set UPSTREAM_AGENT_URL to point at "
-        "the upstream agent, or leave empty to summarize raw user input."
+        "Receives text and uses OpenAI to produce a concise summary. "
+        "Designed to be called by upstream agents that forward their output here."
     ),
     version="0.1.0",
     url=f"http://localhost:{AGENT_PORT}",

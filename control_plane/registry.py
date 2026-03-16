@@ -170,15 +170,19 @@ class AgentRegistry:
     # ---- Health polling ---------------------------------------------------
 
     async def _refresh_instance(self, type_id: str, instance: AgentInstance) -> None:
-        try:
-            r = await self._client.get(f"{instance.url}/.well-known/agent-card.json")
-            r.raise_for_status()
-            instance.card = r.json()
-            instance.status = AgentStatus.ONLINE
-            logger.info("instance_online", type_id=type_id, url=instance.url, name=instance.name)
-        except Exception:
-            instance.status = AgentStatus.OFFLINE
-            logger.warning("instance_offline", type_id=type_id, url=instance.url)
+        # Try the current spec path first, fall back to the deprecated one
+        for path in ("/.well-known/agent-card.json", "/.well-known/agent.json"):
+            try:
+                r = await self._client.get(f"{instance.url}{path}")
+                r.raise_for_status()
+                instance.card = r.json()
+                instance.status = AgentStatus.ONLINE
+                logger.info("instance_online", type_id=type_id, url=instance.url, name=instance.name)
+                return
+            except Exception:
+                continue
+        instance.status = AgentStatus.OFFLINE
+        logger.warning("instance_offline", type_id=type_id, url=instance.url)
 
     async def refresh_all(self) -> None:
         tasks = [

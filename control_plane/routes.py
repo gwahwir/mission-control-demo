@@ -124,7 +124,7 @@ async def _run_task(
     started_at = time.time()
     client = A2AClient(instance.url)
     try:
-        result = await client.send_message(text, task_id=task_id)
+        result = await client.send_message(text)
 
         status = result.get("status", {})
         state_str = status.get("state", "failed")
