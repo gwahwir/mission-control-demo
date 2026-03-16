@@ -30,7 +30,7 @@ async def register_with_control_plane(type_name: str, agent_url: str) -> None:
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 r = await client.post(
-                    f"{cp_url}/agents/register",
+                    f"{cp_url}/register",
                     json={"type_name": type_name, "agent_url": agent_url},
                 )
                 r.raise_for_status()
@@ -50,13 +50,18 @@ async def deregister_from_control_plane(type_name: str, agent_url: str) -> None:
     if not cp_url:
         return
 
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.post(
-                f"{cp_url}/agents/deregister",
-                json={"type_name": type_name, "agent_url": agent_url},
-            )
-            r.raise_for_status()
-            print(f"[registration] Deregistered from control plane: {r.json()}")
-    except Exception as e:
-        print(f"[registration] Deregistration failed ({e}), control plane will detect via health poll")
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=3, follow_redirects=True) as client:
+                r = await client.post(
+                    f"{cp_url}/deregister",
+                    json={"type_name": type_name, "agent_url": agent_url},
+                )
+                r.raise_for_status()
+                print(f"[registration] Deregistered from control plane: {r.json()}")
+                return
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(1)
+            else:
+                print(f"[registration] Deregistration failed ({e}), control plane will detect via health poll")

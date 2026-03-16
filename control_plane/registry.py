@@ -133,6 +133,7 @@ class AgentRegistry:
         self._poll_interval = poll_interval
         self._poll_task: asyncio.Task | None = None
         self._client = httpx.AsyncClient(timeout=5)
+        self._db_pool = None  # set via init_db() when DATABASE_URL is available
 
     # ---- Public read API --------------------------------------------------
 
@@ -148,6 +149,69 @@ class AgentRegistry:
         """Return the best available instance for a type (least-connections)."""
         agent_type = self.get(agent_type_id)
         return agent_type.pick() if agent_type else None
+
+    # ---- State persistence (PostgreSQL) -------------------------------------
+
+    _CREATE_AGENTS_TABLE = """
+    CREATE TABLE IF NOT EXISTS registered_agents (
+        type_id  TEXT NOT NULL,
+        url      TEXT NOT NULL,
+        PRIMARY KEY (type_id, url)
+    );
+    """
+
+    async def init_db(self, database_url: str) -> None:
+        """Initialise the DB pool and create the agents table if needed."""
+        import asyncpg
+        self._db_pool = await asyncpg.create_pool(dsn=database_url, min_size=1, max_size=5)
+        async with self._db_pool.acquire() as conn:
+            await conn.execute(self._CREATE_AGENTS_TABLE)
+        logger.info("registry_db_ready")
+
+    async def _save_instance(self, type_id: str, url: str) -> None:
+        """Persist a single agent instance to the database."""
+        if not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO registered_agents (type_id, url) VALUES ($1, $2) "
+                    "ON CONFLICT (type_id, url) DO NOTHING",
+                    type_id, url,
+                )
+        except Exception as e:
+            logger.warning("registry_save_failed", type_id=type_id, url=url, error=str(e))
+
+    async def _delete_instance(self, type_id: str, url: str) -> None:
+        """Remove a single agent instance from the database."""
+        if not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM registered_agents WHERE type_id = $1 AND url = $2",
+                    type_id, url,
+                )
+        except Exception as e:
+            logger.warning("registry_delete_failed", type_id=type_id, url=url, error=str(e))
+
+    async def load_state(self) -> None:
+        """Load previously registered agents from the database and health-check them."""
+        if not self._db_pool:
+            logger.info("registry_state_skip", reason="no database configured")
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT type_id, url FROM registered_agents")
+        except Exception as e:
+            logger.warning("registry_state_load_failed", error=str(e))
+            return
+
+        count = 0
+        for row in rows:
+            await self.register_instance(row["type_id"], row["url"])
+            count += 1
+        logger.info("registry_state_loaded", count=count)
 
     # ---- Registration -----------------------------------------------------
 
@@ -171,9 +235,10 @@ class AgentRegistry:
         instance = AgentInstance(url=url)
         agent_type.instances.append(instance)
         await self._refresh_instance(type_id, instance)
+        await self._save_instance(type_id, url)
         return instance
 
-    def remove_instance(self, type_id: str, url: str) -> bool:
+    async def remove_instance(self, type_id: str, url: str) -> bool:
         """Remove an instance by URL. Returns True if found and removed."""
         url = url.rstrip("/")
         agent_type = self._types.get(type_id)
@@ -185,6 +250,7 @@ class AgentRegistry:
                 logger.info("instance_removed", type_id=type_id, url=url)
                 if not agent_type.instances:
                     del self._types[type_id]
+                await self._delete_instance(type_id, url)
                 return True
         return False
 
@@ -236,3 +302,5 @@ class AgentRegistry:
     async def close(self) -> None:
         self.stop_polling()
         await self._client.aclose()
+        if self._db_pool:
+            await self._db_pool.close()

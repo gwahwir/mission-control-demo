@@ -63,34 +63,6 @@ class RegisterRequest(BaseModel):
 # Agent endpoints
 # ------------------------------------------------------------------
 
-@router.post("/agents/register")
-async def register_agent(req: RegisterRequest) -> dict[str, Any]:
-    """Allow agents to self-register with the control plane."""
-    assert _registry is not None
-    instance = await _registry.register_instance(req.type_name, req.agent_url)
-    logger.info("agent_registered", type_name=req.type_name, url=req.agent_url, status=instance.status.value)
-    return {
-        "status": "registered",
-        "type_name": req.type_name,
-        "agent_url": req.agent_url,
-        "agent_status": instance.status.value,
-    }
-
-
-@router.post("/agents/deregister")
-async def deregister_agent(req: RegisterRequest) -> dict[str, Any]:
-    """Allow agents to deregister on shutdown."""
-    assert _registry is not None
-    removed = _registry.remove_instance(req.type_name, req.agent_url)
-    if removed:
-        logger.info("agent_deregistered", type_name=req.type_name, url=req.agent_url)
-    return {
-        "status": "deregistered" if removed else "not_found",
-        "type_name": req.type_name,
-        "agent_url": req.agent_url,
-    }
-
-
 @router.get("/agents")
 async def list_agents() -> list[dict[str, Any]]:
     assert _registry is not None
@@ -104,6 +76,34 @@ async def get_agent(agent_id: str) -> dict[str, Any]:
     if not agent_type:
         raise HTTPException(404, f"Agent '{agent_id}' not found")
     return agent_type.to_dict()
+
+
+@router.post("/register")
+async def register_agent(req: RegisterRequest) -> dict[str, Any]:
+    """Allow agents to self-register with the control plane."""
+    assert _registry is not None
+    instance = await _registry.register_instance(req.type_name, req.agent_url)
+    logger.info("agent_registered", type_name=req.type_name, url=req.agent_url, status=instance.status.value)
+    return {
+        "status": "registered",
+        "type_name": req.type_name,
+        "agent_url": req.agent_url,
+        "agent_status": instance.status.value,
+    }
+
+
+@router.post("/deregister")
+async def deregister_agent(req: RegisterRequest) -> dict[str, Any]:
+    """Allow agents to deregister on shutdown."""
+    assert _registry is not None
+    removed = await _registry.remove_instance(req.type_name, req.agent_url)
+    if removed:
+        logger.info("agent_deregistered", type_name=req.type_name, url=req.agent_url)
+    return {
+        "status": "deregistered" if removed else "not_found",
+        "type_name": req.type_name,
+        "agent_url": req.agent_url,
+    }
 
 
 # ------------------------------------------------------------------
@@ -157,7 +157,7 @@ async def _run_task(
     await _broker.publish(task_id, record.to_dict())
 
     started_at = time.time()
-    client = A2AClient(instance.url)
+    client = A2AClient(instance.url, timeout=300)
     try:
         result = await client.send_message(text)
 
@@ -173,6 +173,10 @@ async def _run_task(
         record.state = TaskState(state_str)
         record.output_text = output
         record.a2a_task = result
+
+        # Extract error detail from the agent's response when task failed
+        if record.state == TaskState.FAILED:
+            record.error = output or "Agent returned failed state with no details"
 
         elapsed = time.time() - started_at
         task_duration.labels(agent_id=agent_id).observe(elapsed)
@@ -191,11 +195,29 @@ async def _run_task(
             instance=instance.url,
         )
 
+    except A2AError as exc:
+        tasks_failed.labels(agent_id=agent_id).inc()
+        logger.error("task_a2a_error", task_id=task_id, error=str(exc))
+        record.state = TaskState.FAILED
+        record.error = f"A2A protocol error: {exc}"
+
+    except httpx.HTTPStatusError as exc:
+        tasks_failed.labels(agent_id=agent_id).inc()
+        logger.error("task_http_error", task_id=task_id, status=exc.response.status_code, error=str(exc))
+        record.state = TaskState.FAILED
+        record.error = f"HTTP {exc.response.status_code}: {exc.response.text[:500]}"
+
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        tasks_failed.labels(agent_id=agent_id).inc()
+        logger.error("task_connection_error", task_id=task_id, error=str(exc))
+        record.state = TaskState.FAILED
+        record.error = f"Connection failed: {type(exc).__name__} — {exc}"
+
     except Exception as exc:
         tasks_failed.labels(agent_id=agent_id).inc()
         logger.error("task_error", task_id=task_id, error=str(exc))
         record.state = TaskState.FAILED
-        record.output_text = str(exc)
+        record.error = f"{type(exc).__name__}: {exc}"
 
     finally:
         await client.close()
@@ -250,6 +272,26 @@ async def cancel_task_endpoint(agent_id: str, task_id: str) -> dict[str, Any]:
 async def list_all_tasks() -> list[dict[str, Any]]:
     assert _task_store is not None
     return [t.to_dict() for t in await _task_store.list_all()]
+
+
+@router.delete("/tasks")
+async def delete_all_tasks() -> dict[str, Any]:
+    """Delete all task history."""
+    assert _task_store is not None
+    count = await _task_store.delete_all()
+    logger.info("tasks_cleared", count=count)
+    return {"status": "cleared", "deleted": count}
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str) -> dict[str, Any]:
+    """Delete a single task from history."""
+    assert _task_store is not None
+    deleted = await _task_store.delete(task_id)
+    if not deleted:
+        raise HTTPException(404, "Task not found")
+    logger.info("task_deleted", task_id=task_id)
+    return {"status": "deleted", "task_id": task_id}
 
 
 # ------------------------------------------------------------------

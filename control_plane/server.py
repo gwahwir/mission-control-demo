@@ -56,7 +56,12 @@ async def lifespan(app: FastAPI):
         await broker.init()
         logger.info("redis_connected", url=settings.redis_url)
 
-    # Agent discovery
+    # Registry persistence — share the same Postgres connection if available
+    if settings.database_url:
+        await registry.init_db(settings.database_url)
+
+    # Agent discovery — restore previous state, then register from env
+    await registry.load_state()
     logger.info("startup", agent_count=len(settings.agents))
     await registry.register_all(settings.agents)
     registry.start_polling()

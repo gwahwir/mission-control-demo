@@ -41,6 +41,7 @@ class TaskRecord:
     state: TaskState = TaskState.SUBMITTED
     input_text: str = ""
     output_text: str = ""
+    error: str = ""                 # error message when state is failed
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     a2a_task: dict[str, Any] = field(default_factory=dict)
@@ -53,6 +54,7 @@ class TaskRecord:
             "state": self.state.value,
             "input_text": self.input_text,
             "output_text": self.output_text,
+            "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -69,6 +71,7 @@ class TaskRecord:
             state=TaskState(row["state"]),
             input_text=row.get("input_text", ""),
             output_text=row.get("output_text", ""),
+            error=row.get("error", ""),
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
             a2a_task=a2a_task,
@@ -101,6 +104,17 @@ class TaskStore:
     async def list_by_agent(self, agent_id: str) -> list[TaskRecord]:
         return [t for t in await self.list_all() if t.agent_id == agent_id]
 
+    async def delete(self, task_id: str) -> bool:
+        if task_id in self._tasks:
+            del self._tasks[task_id]
+            return True
+        return False
+
+    async def delete_all(self) -> int:
+        count = len(self._tasks)
+        self._tasks.clear()
+        return count
+
 
 # ---------------------------------------------------------------------------
 # PostgreSQL implementation
@@ -114,20 +128,26 @@ CREATE TABLE IF NOT EXISTS tasks (
     state        TEXT   NOT NULL,
     input_text   TEXT   NOT NULL DEFAULT '',
     output_text  TEXT   NOT NULL DEFAULT '',
+    error        TEXT   NOT NULL DEFAULT '',
     created_at   FLOAT8 NOT NULL,
     updated_at   FLOAT8 NOT NULL,
     a2a_task     TEXT   NOT NULL DEFAULT '{}'
 );
 """
 
+_ADD_ERROR_COLUMN = """
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT '';
+"""
+
 _UPSERT = """
 INSERT INTO tasks
-    (task_id, agent_id, instance_url, state, input_text, output_text, created_at, updated_at, a2a_task)
+    (task_id, agent_id, instance_url, state, input_text, output_text, error, created_at, updated_at, a2a_task)
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (task_id) DO UPDATE SET
     state        = EXCLUDED.state,
     output_text  = EXCLUDED.output_text,
+    error        = EXCLUDED.error,
     updated_at   = EXCLUDED.updated_at,
     a2a_task     = EXCLUDED.a2a_task;
 """
@@ -148,6 +168,7 @@ class PostgresTaskStore:
         self._pool = await asyncpg.create_pool(dsn=database_url, min_size=2, max_size=10)
         async with self._pool.acquire() as conn:
             await conn.execute(_CREATE_TABLE)
+            await conn.execute(_ADD_ERROR_COLUMN)
 
     async def close(self) -> None:
         if self._pool:
@@ -164,6 +185,7 @@ class PostgresTaskStore:
                 record.state.value,
                 record.input_text,
                 record.output_text,
+                record.error,
                 record.created_at,
                 record.updated_at,
                 json.dumps(record.a2a_task),
@@ -185,3 +207,14 @@ class PostgresTaskStore:
                 "SELECT * FROM tasks WHERE agent_id = $1 ORDER BY created_at DESC", agent_id
             )
         return [TaskRecord.from_row(dict(r)) for r in rows]
+
+    async def delete(self, task_id: str) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM tasks WHERE task_id = $1", task_id)
+        return result == "DELETE 1"
+
+    async def delete_all(self) -> int:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM tasks")
+        # result is e.g. "DELETE 42"
+        return int(result.split()[-1])

@@ -26,9 +26,10 @@ PIDS=()
 
 cleanup() {
   echo ""
-  echo "Shutting down all components..."
-  for pid in "${PIDS[@]}"; do
-    kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null || true
+  echo "Shutting down all components (agents first, then control plane)..."
+  # Shut down in reverse order so agents can deregister while the control plane is still running
+  for (( i=${#PIDS[@]}-1; i>=0; i-- )); do
+    kill "${PIDS[$i]}" 2>/dev/null && wait "${PIDS[$i]}" 2>/dev/null || true
   done
   echo "All components stopped."
   exit 0
