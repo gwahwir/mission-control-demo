@@ -12,6 +12,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mc-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mc -d missioncontrol"]
       interval: 5s
@@ -24,6 +26,8 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    networks:
+      - mc-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -42,6 +46,9 @@ services:
       - LOG_LEVEL=INFO
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+    networks:
+      - mc-net
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/.well-known/agent-card.json').raise_for_status()"]
       interval: 10s
@@ -59,6 +66,8 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - DOWNSTREAM_AGENT_URL=http://summarizer:8002
+    networks:
+      - mc-net
     depends_on:
       summarizer:
         condition: service_healthy
@@ -81,9 +90,11 @@ services:
       - "8000:8000"
     environment:
       - LOG_LEVEL=INFO
-      - AGENT_URLS=echo-agent@http://echo-agent-1:8001,summarizer@http://summarizer-1:8002
+      - AGENT_URLS=echo-agent@http://echo-agent:8001,summarizer@http://summarizer:8002
       - DATABASE_URL=postgresql://mc:mc_password@postgres:5432/missioncontrol
       - REDIS_URL=redis://redis:6379/0
+    networks:
+      - mc-net
     depends_on:
       echo-agent:
         condition: service_healthy
@@ -107,9 +118,21 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:80"
+    networks:
+      - mc-net
     depends_on:
       control-plane:
         condition: service_healthy
+  
+  network-tool:
+    image: wbitt/network-multitool:latest
+    networks:
+      - mc-net
+
+
+networks:
+  mc-net:
+    driver: bridge
 
 volumes:
   postgres_data:
