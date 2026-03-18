@@ -1,7 +1,7 @@
 """Lead Analyst agent built with LangGraph.
 
 Receives input and fans out to N downstream sub-agents (defined in
-``sub_agents.yaml``) via A2A, collects their results in parallel, and
+YAML config) via A2A, collects their results in parallel, and
 uses an LLM meta-analyst to synthesize an aggregated report.
 
 Nodes (dynamically generated):
@@ -21,7 +21,7 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
-from agents.lead_analyst.config import SubAgentConfig, load_sub_agents
+from agents.lead_analyst.config import SubAgentConfig
 
 
 # ---------------------------------------------------------------------------
@@ -237,44 +237,54 @@ def _build_aggregation_prompt(input_text: str, results: list[tuple[str, str]]) -
     return "\n".join(parts)
 
 
-async def aggregate(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
-    """Synthesize sub-agent results using an LLM meta-analyst."""
-    executor = config["configurable"]["executor"]
-    task_id = config["configurable"]["task_id"]
-    executor.check_cancelled(task_id)
-    print(results)
+def _make_aggregate_node(
+    system_prompt: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_completion_tokens: int = 4096,
+):
+    """Return an async aggregate node function closing over the given params."""
+    effective_prompt = system_prompt or AGGREGATOR_SYSTEM_PROMPT
 
-    results = [r for r in state.get("results", []) if not r[1].startswith("[Error")]
-    if not results:
-        return {"output": "No sub-agent results available."}
+    async def aggregate(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
+        """Synthesize sub-agent results using an LLM meta-analyst."""
+        executor = config["configurable"]["executor"]
+        task_id = config["configurable"]["task_id"]
+        executor.check_cancelled(task_id)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        sections = [f"=== {label} ===\n{text}" for label, text in results]
-        return {"output": "\n\n".join(sections)}
+        results = [r for r in state.get("results", []) if not r[1].startswith("[Error")]
+        if not results:
+            return {"output": "No sub-agent results available."}
 
-    user_prompt = _build_aggregation_prompt(state["input"], results)
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            sections = [f"=== {label} ===\n{text}" for label, text in results]
+            return {"output": "\n\n".join(sections)}
 
-    from langfuse.openai import AsyncOpenAI
+        user_prompt = _build_aggregation_prompt(state["input"], results)
 
-    openai_kwargs: dict[str, Any] = {"api_key": api_key}
-    base_url = os.getenv("OPENAI_BASE_URL")
-    if base_url:
-        openai_kwargs["base_url"] = base_url
-    client = AsyncOpenAI(**openai_kwargs)
+        from langfuse.openai import AsyncOpenAI
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": AGGREGATOR_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-        max_completion_tokens=4096,
-    )
+        openai_kwargs: dict[str, Any] = {"api_key": api_key}
+        base_url = os.getenv("OPENAI_BASE_URL")
+        if base_url:
+            openai_kwargs["base_url"] = base_url
+        client = AsyncOpenAI(**openai_kwargs)
 
-    return {"output": resp.choices[0].message.content or ""}
+        effective_model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        resp = await client.chat.completions.create(
+            model=effective_model,
+            messages=[
+                {"role": "system", "content": effective_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
+        )
+
+        return {"output": resp.choices[0].message.content or ""}
+
+    return aggregate
 
 
 def respond(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
@@ -285,22 +295,23 @@ def respond(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Graph builder — reads sub_agents.yaml and wires up N parallel nodes
+# Graph builder — reads config and wires up N parallel nodes
 # ---------------------------------------------------------------------------
 
 def build_lead_analyst_graph(
-    sub_agents: list[SubAgentConfig] | None = None,
+    sub_agents: list[SubAgentConfig],
+    aggregation_prompt: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_completion_tokens: int = 4096,
 ) -> StateGraph:
-    """Build and compile the lead analyst graph.
-
-    If *sub_agents* is not provided, loads from ``sub_agents.yaml``.
-    """
-    if sub_agents is None:
-        sub_agents = load_sub_agents()
-
+    """Build and compile the lead analyst graph."""
     graph = StateGraph(LeadAnalystState)
     graph.add_node("receive", receive)
-    graph.add_node("aggregate", aggregate)
+    graph.add_node(
+        "aggregate",
+        _make_aggregate_node(aggregation_prompt, model, temperature, max_completion_tokens),
+    )
     graph.add_node("respond", respond)
 
     # Dynamically add one node per sub-agent, all fanning out from receive

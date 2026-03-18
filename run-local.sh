@@ -102,9 +102,6 @@ wait_for_port $EXTRACTION_PORT "Extraction Agent"
 echo "[6/8] Starting Lead Analyst Agent on port $LEAD_ANALYST_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 LEAD_ANALYST_AGENT_URL="http://127.0.0.1:$LEAD_ANALYST_PORT" \
-SUB_AGENT_A_URL="${SUB_AGENT_A_URL:-}" \
-SUB_AGENT_B_URL="${SUB_AGENT_B_URL:-}" \
-SUB_AGENT_C_URL="${SUB_AGENT_C_URL:-}" \
   python -m agents.lead_analyst.server &
 PIDS+=($!)
 wait_for_port $LEAD_ANALYST_PORT "Lead Analyst Agent"

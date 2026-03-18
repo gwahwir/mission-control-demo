@@ -46,7 +46,7 @@ class ControlPlaneSettings(BaseModel):
 
 
 def load_settings() -> ControlPlaneSettings:
-    raw = os.getenv("AGENT_URLS", "http://localhost:8001")
+    raw = os.getenv("AGENT_URLS", "")
     agents: list[AgentEndpoint] = []
     for entry in raw.split(","):
         entry = entry.strip()
