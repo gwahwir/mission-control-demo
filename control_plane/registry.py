@@ -230,13 +230,50 @@ class AgentRegistry:
         for inst in agent_type.instances:
             if inst.url == url:
                 await self._refresh_instance(type_id, inst)
+                if inst.status == AgentStatus.OFFLINE:
+                    asyncio.create_task(self._retry_refresh_on_registration(type_id, inst))
                 return inst
 
         instance = AgentInstance(url=url)
         agent_type.instances.append(instance)
         await self._refresh_instance(type_id, instance)
         await self._save_instance(type_id, url)
+        if instance.status == AgentStatus.OFFLINE:
+            asyncio.create_task(self._retry_refresh_on_registration(type_id, instance))
         return instance
+
+    async def _retry_refresh_on_registration(
+        self,
+        type_id: str,
+        instance: AgentInstance,
+        attempts: int = 5,
+        delay: float = 1.0,
+    ) -> None:
+        """Retry fetching the agent card shortly after registration.
+
+        Handles the race where the agent's HTTP server isn't fully ready
+        at the moment the control plane pings back, without waiting for the
+        30-second health-poll cycle.
+        """
+        for attempt in range(1, attempts + 1):
+            await asyncio.sleep(delay)
+            if instance.status == AgentStatus.ONLINE:
+                return  # Already came online (e.g. via concurrent poll)
+            await self._refresh_instance(type_id, instance)
+            if instance.status == AgentStatus.ONLINE:
+                logger.info(
+                    "instance_online_after_registration_retry",
+                    type_id=type_id,
+                    url=instance.url,
+                    attempt=attempt,
+                )
+                return
+            delay = min(delay * 2, 8.0)  # exponential back-off, capped at 8 s
+        logger.warning(
+            "instance_offline_after_registration_retries",
+            type_id=type_id,
+            url=instance.url,
+        )
 
     async def remove_instance(self, type_id: str, url: str) -> bool:
         """Remove an instance by URL. Returns True if found and removed."""
