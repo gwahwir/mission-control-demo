@@ -49,6 +49,8 @@ async def forward_downstream(state: EchoState, config: RunnableConfig) -> dict[s
     task_id = config["configurable"]["task_id"]
     executor.check_cancelled(task_id)
 
+    context_id = config["configurable"].get("context_id")
+
     downstream_url = os.getenv("DOWNSTREAM_AGENT_URL", "")
     if not downstream_url:
         return {}
@@ -57,7 +59,7 @@ async def forward_downstream(state: EchoState, config: RunnableConfig) -> dict[s
 
     client = A2AClient(downstream_url)
     try:
-        result = await client.send_message(state["processed"])
+        result = await client.send_message(state["processed"], context_id=context_id)
         status = result.get("status", {})
         msg = status.get("message", {})
         parts = msg.get("parts", [])

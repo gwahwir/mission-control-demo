@@ -19,6 +19,7 @@ import os
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
+from langfuse import observe
 from langgraph.graph import END, StateGraph
 
 from agents.lead_analyst.config import SubAgentConfig
@@ -136,13 +137,13 @@ class LeadAnalystState(TypedDict):
 # A2A helper
 # ---------------------------------------------------------------------------
 
-async def _call_sub_agent(url: str, text: str) -> str:
+async def _call_sub_agent(url: str, text: str, context_id: str | None = None) -> str:
     """Call a downstream sub-agent via A2A and return the output text."""
     from control_plane.a2a_client import A2AClient
 
     client = A2AClient(url, timeout=300)
     try:
-        result = await client.send_message(text)
+        result = await client.send_message(text, context_id=context_id)
         status = result.get("status", {})
         msg = status.get("message", {})
         parts = msg.get("parts", [])
@@ -163,8 +164,10 @@ def _make_sub_agent_node(sa: SubAgentConfig):
         task_id = config["configurable"]["task_id"]
         executor.check_cancelled(task_id)
 
+        context_id = config["configurable"].get("context_id")
+
         try:
-            text = await _call_sub_agent(sa.url, state["input"])
+            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id)
         except Exception as exc:
             text = f"[Error calling {sa.label}: {exc}]"
 
@@ -236,12 +239,12 @@ def _build_aggregation_prompt(input_text: str, results: list[tuple[str, str]]) -
     parts.extend(["## Your Task:", "", AGGREGATION_OUTPUT_FORMAT])
     return "\n".join(parts)
 
-
 def _make_aggregate_node(
     system_prompt: str | None = None,
     model: str | None = None,
     temperature: float = 0.3,
     max_completion_tokens: int = 4096,
+    name: str = "Lead_Analyst_Generic"
 ):
     """Return an async aggregate node function closing over the given params."""
     effective_prompt = system_prompt or AGGREGATOR_SYSTEM_PROMPT
@@ -250,6 +253,7 @@ def _make_aggregate_node(
         """Synthesize sub-agent results using an LLM meta-analyst."""
         executor = config["configurable"]["executor"]
         task_id = config["configurable"]["task_id"]
+        context_id = config["configurable"].get("context_id")
         executor.check_cancelled(task_id)
 
         results = [r for r in state.get("results", []) if not r[1].startswith("[Error")]
@@ -280,6 +284,7 @@ def _make_aggregate_node(
             ],
             temperature=temperature,
             max_completion_tokens=max_completion_tokens,
+            name=name
         )
 
         return {"output": resp.choices[0].message.content or ""}
@@ -304,13 +309,14 @@ def build_lead_analyst_graph(
     model: str | None = None,
     temperature: float = 0.3,
     max_completion_tokens: int = 4096,
+    name: str = ""
 ) -> StateGraph:
     """Build and compile the lead analyst graph."""
     graph = StateGraph(LeadAnalystState)
     graph.add_node("receive", receive)
     graph.add_node(
         "aggregate",
-        _make_aggregate_node(aggregation_prompt, model, temperature, max_completion_tokens),
+        _make_aggregate_node(aggregation_prompt, model, temperature, max_completion_tokens, name),
     )
     graph.add_node("respond", respond)
 

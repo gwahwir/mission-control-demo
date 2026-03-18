@@ -141,7 +141,7 @@ class LangGraphA2AExecutor(AgentExecutor, CancellableMixin):
             result: dict[str, Any] = {}
             async for event in self.graph.astream(
                 graph_input,
-                config={"configurable": {"executor": self, "task_id": task_id}},
+                config={"configurable": {"executor": self, "task_id": task_id, "context_id": context_id}},
                 stream_mode="updates",
             ):
                 # Each event is {node_name: state_update}

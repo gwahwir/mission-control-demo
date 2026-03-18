@@ -27,4 +27,5 @@ class LeadAnalystExecutor(LangGraphA2AExecutor):
             model=self._config.model,
             temperature=self._config.temperature,
             max_completion_tokens=self._config.max_completion_tokens,
+            name=self._config.name
         )

@@ -21,6 +21,7 @@ RELEVANCY_PORT=8003
 EXTRACTION_PORT=8004
 LEAD_ANALYST_PORT=8005
 SPECIALIST_PORT=8006
+PROBABILITY_PORT=8007
 CONTROL_PLANE_PORT=8000
 DASHBOARD_PORT=5173
 
@@ -58,7 +59,7 @@ echo "=== Mission Control — Local Dev ==="
 echo ""
 
 # ── Control Plane (start first so agents can self-register) ──
-echo "[1/8] Starting Control Plane on port $CONTROL_PLANE_PORT..."
+echo "[1/9] Starting Control Plane on port $CONTROL_PLANE_PORT..."
 python -m control_plane.server &
 PIDS+=($!)
 wait_for_port $CONTROL_PLANE_PORT "Control Plane"
@@ -66,7 +67,7 @@ wait_for_port $CONTROL_PLANE_PORT "Control Plane"
 CP_URL="http://127.0.0.1:$CONTROL_PLANE_PORT"
 
 # ── Summarizer Agent ────────────────────────────────────────
-echo "[2/8] Starting Summarizer Agent on port $SUMMARIZER_PORT..."
+echo "[2/9] Starting Summarizer Agent on port $SUMMARIZER_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 SUMMARIZER_AGENT_URL="http://127.0.0.1:$SUMMARIZER_PORT" \
   python -m agents.summarizer.server &
@@ -74,7 +75,7 @@ PIDS+=($!)
 wait_for_port $SUMMARIZER_PORT "Summarizer Agent"
 
 # ── Relevancy Agent ─────────────────────────────────────────
-echo "[3/8] Starting Relevancy Agent on port $RELEVANCY_PORT..."
+echo "[3/9] Starting Relevancy Agent on port $RELEVANCY_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 RELEVANCY_AGENT_URL="http://127.0.0.1:$RELEVANCY_PORT" \
   python -m agents.relevancy.server &
@@ -82,7 +83,7 @@ PIDS+=($!)
 wait_for_port $RELEVANCY_PORT "Relevancy Agent"
 
 # ── Echo Agent ──────────────────────────────────────────────
-echo "[4/8] Starting Echo Agent on port $ECHO_PORT..."
+echo "[4/9] Starting Echo Agent on port $ECHO_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 ECHO_AGENT_URL="http://127.0.0.1:$ECHO_PORT" \
 DOWNSTREAM_AGENT_URL="http://127.0.0.1:$SUMMARIZER_PORT" \
@@ -91,7 +92,7 @@ PIDS+=($!)
 wait_for_port $ECHO_PORT "Echo Agent"
 
 # ── Extraction Agent ───────────────────────────────────────
-echo "[5/8] Starting Extraction Agent on port $EXTRACTION_PORT..."
+echo "[5/9] Starting Extraction Agent on port $EXTRACTION_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 EXTRACTION_AGENT_URL="http://127.0.0.1:$EXTRACTION_PORT" \
   python -m agents.extraction_agent.server &
@@ -99,7 +100,7 @@ PIDS+=($!)
 wait_for_port $EXTRACTION_PORT "Extraction Agent"
 
 # ── Lead Analyst Agent ─────────────────────────────────────
-echo "[6/8] Starting Lead Analyst Agent on port $LEAD_ANALYST_PORT..."
+echo "[6/9] Starting Lead Analyst Agent on port $LEAD_ANALYST_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 LEAD_ANALYST_AGENT_URL="http://127.0.0.1:$LEAD_ANALYST_PORT" \
   python -m agents.lead_analyst.server &
@@ -107,15 +108,23 @@ PIDS+=($!)
 wait_for_port $LEAD_ANALYST_PORT "Lead Analyst Agent"
 
 # ── Specialist Agent ──────────────────────────────────────────
-echo "[7/8] Starting Specialist Agent on port $SPECIALIST_PORT..."
+echo "[7/9] Starting Specialist Agent on port $SPECIALIST_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 SPECIALIST_AGENT_URL="http://127.0.0.1:$SPECIALIST_PORT" \
   python -m agents.specialist_agent.server &
 PIDS+=($!)
 wait_for_port $SPECIALIST_PORT "Specialist Agent"
 
+# ── Probability Forecasting Agent ────────────────────────────
+echo "[8/9] Starting Probability Agent on port $PROBABILITY_PORT..."
+CONTROL_PLANE_URL="$CP_URL" \
+PROBABILITY_AGENT_URL="http://127.0.0.1:$PROBABILITY_PORT" \
+  python -m agents.probability_agent.server &
+PIDS+=($!)
+wait_for_port $PROBABILITY_PORT "Probability Agent"
+
 # ── Dashboard ───────────────────────────────────────────────
-echo "[8/8] Starting Dashboard on port $DASHBOARD_PORT..."
+echo "[9/9] Starting Dashboard on port $DASHBOARD_PORT..."
 cd dashboard
 npm run dev -- --host 2>&1 &
 PIDS+=($!)
@@ -132,6 +141,7 @@ echo "  Relevancy:      http://localhost:$RELEVANCY_PORT"
 echo "  Extraction:     http://localhost:$EXTRACTION_PORT"
 echo "  Lead Analyst:   http://localhost:$LEAD_ANALYST_PORT"
 echo "  Specialist:     http://localhost:$SPECIALIST_PORT"
+echo "  Probability:    http://localhost:$PROBABILITY_PORT"
 echo ""
 echo "Press Ctrl+C to stop all components."
 echo ""

@@ -28,6 +28,7 @@ OPENAI_API_KEY=sk-... python -m agents.relevancy.server
 OPENAI_API_KEY=sk-... python -m agents.extraction_agent.server
 python -m agents.lead_analyst.server
 OPENAI_API_KEY=sk-... python -m agents.specialist_agent.server
+OPENAI_API_KEY=sk-... python -m agents.probability_agent.server
 
 # Run everything locally (starts control plane, all agents, and dashboard)
 bash run-local.sh
@@ -84,6 +85,7 @@ LangGraph agents wrapped with `a2a-sdk` HTTP servers. Each agent:
 | Extraction (`agents/extraction_agent/`) | 8004 | `extraction` | Extracts structured entities/events/relationships from text |
 | Lead Analyst (`agents/lead_analyst/`) | 8005 | per-YAML | Multi-instance orchestrator: hosts N lead analysts from YAML configs, each fans out to sub-agents via A2A and aggregates results |
 | Specialist (`agents/specialist_agent/`) | 8006 | per-YAML | Multi-agent-per-deployment: hosts 16 LLM specialists (2 utility + 14 analytical frameworks) from YAML configs |
+| Probability (`agents/probability_agent/`) | 8007 | `probability-forecaster` | Takes concatenated specialist analyses, performs probability aggregation, disagreement detection, peripheral scanning, and generates structured briefings |
 
 Each agent has its own README.md with detailed docs.
 
@@ -113,6 +115,7 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `EXTRACTION_AGENT_URL` | Extraction | `http://localhost:8004` |
 | `LEAD_ANALYST_AGENT_URL` | Lead Analyst | `http://localhost:8005` |
 | `SPECIALIST_AGENT_URL` | Specialist | `http://localhost:8006` |
+| `PROBABILITY_AGENT_URL` | Probability | `http://localhost:8007` |
 
 ### Shared Agent Variables
 

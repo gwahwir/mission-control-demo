@@ -1,0 +1,12 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agents/ agents/
+COPY control_plane/ control_plane/
+
+EXPOSE 8007
+CMD ["python", "-m", "agents.probability_agent.server"]

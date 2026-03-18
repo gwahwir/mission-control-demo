@@ -23,4 +23,5 @@ class SpecialistExecutor(LangGraphA2AExecutor):
             temperature=self._config.temperature,
             max_completion_tokens=self._config.max_completion_tokens,
             output_format=self._config.output_format,
+            name=self._config.name
         )

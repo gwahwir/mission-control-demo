@@ -32,7 +32,7 @@ def _to_node_id(label: str) -> str:
     ``'ASEAN Security Analyst'`` → ``'call_asean_security_analyst'``
     """
     slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
-    return f"call_{slug}"
+    return f"{slug}"
 
 
 def _derive_type_id(filename: str) -> str:
