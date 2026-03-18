@@ -186,6 +186,10 @@ const theme = createTheme({
           backgroundColor: "var(--hud-bg-panel)",
           borderBottom: "1px solid var(--hud-border)",
         },
+        navbar: {
+          backgroundColor: "var(--hud-bg-panel)",
+          borderRight: "1px solid var(--hud-border)",
+        },
         main: {
           backgroundColor: "var(--hud-bg-deep)",
         },

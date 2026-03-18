@@ -10,7 +10,7 @@ export default function AgentCard({ agent, onSelect }) {
 
   return (
     <Card
-      padding="md"
+      padding="xs"
       onClick={() => onSelect(agent)}
       style={{
         cursor: "pointer",
@@ -33,91 +33,80 @@ export default function AgentCard({ agent, onSelect }) {
           position: "absolute",
           top: 0,
           left: 0,
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           borderTop: "2px solid var(--hud-cyan)",
           borderLeft: "2px solid var(--hud-cyan)",
         }}
       />
 
-      <Group justify="space-between" mb="xs">
+      <Group justify="space-between" mb={4} wrap="nowrap">
         <Text
-          fw={600}
-          size="lg"
+          fw={900}
+          size="m"
           style={{ flex: 1, minWidth: 0, color: "var(--hud-text-primary)" }}
           lineClamp={1}
         >
           {agent.name}
         </Text>
-        <Badge
-          color={isOnline ? "hud-green" : "hud-red"}
-          variant="light"
-          size="sm"
-          leftSection={
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                backgroundColor: statusColor,
-                display: "inline-block",
-                animation: "pulse-glow 2s ease-in-out infinite",
-                color: statusColor,
-              }}
-            />
-          }
-        >
-          {agent.status}
-        </Badge>
+        <span
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            backgroundColor: statusColor,
+            display: "inline-block",
+            animation: "pulse-glow 2s ease-in-out infinite",
+            color: statusColor,
+            flexShrink: 0,
+          }}
+        />
       </Group>
 
-      <Text size="sm" style={{ color: "var(--hud-text-dimmed)" }} lineClamp={2} mb="sm">
+      <Text size="s" style={{ color: "var(--hud-text-dimmed)" }} lineClamp={1} mb={4}>
         {agent.description}
       </Text>
 
-      <Group gap="xs" justify="space-between">
-        <Group gap="xs">
-          {agent.skills?.length > 0 &&
-            agent.skills.slice(0, 3).map((skill) => (
-              <Badge
-                key={skill.id}
-                variant="outline"
-                size="xs"
-                style={{
-                  borderColor: "var(--hud-border)",
-                  color: "var(--hud-text-dimmed)",
-                  textTransform: "uppercase",
-                }}
-              >
-                {skill.name}
-              </Badge>
-            ))}
-          {agent.skills?.length > 3 && (
+      <Group gap={4} wrap="wrap">
+        {agent.skills?.length > 0 &&
+          agent.skills.slice(0, 2).map((skill) => (
             <Badge
+              key={skill.id}
               variant="outline"
               size="xs"
               style={{
                 borderColor: "var(--hud-border)",
                 color: "var(--hud-text-dimmed)",
+                textTransform: "uppercase",
+                fontSize: 9,
               }}
             >
-              +{agent.skills.length - 3}
+              {skill.name}
             </Badge>
-          )}
-        </Group>
-
-        <Group gap={6}>
-          {instances.length > 1 && (
-            <Badge variant="light" color="hud-cyan" size="xs">
-              {onlineInstances.length}/{instances.length} instances
-            </Badge>
-          )}
-          {totalActive > 0 && (
-            <Badge variant="light" color="hud-amber" size="xs">
-              {totalActive} active
-            </Badge>
-          )}
-        </Group>
+          ))}
+        {agent.skills?.length > 2 && (
+          <Badge
+            variant="outline"
+            size="xs"
+            style={{
+              borderColor: "var(--hud-border)",
+              color: "var(--hud-text-dimmed)",
+              fontSize: 9,
+            }}
+          >
+            +{agent.skills.length - 2}
+          </Badge>
+        )}
+        {instances.length > 1 && (
+          <Badge variant="light" color="hud-cyan" size="xs" style={{ fontSize: 9 }}>
+            {onlineInstances.length}/{instances.length}
+          </Badge>
+        )}
+        {totalActive > 0 && (
+          <Badge variant="light" color="hud-amber" size="xs" style={{ fontSize: 9 }}>
+            {totalActive} active
+          </Badge>
+        )}
       </Group>
     </Card>
   );

@@ -100,7 +100,11 @@ function App() {
   const onlineCount = agents.filter((a) => a.status === "online").length;
 
   return (
-    <AppShell header={{ height: 60 }} padding="md">
+    <AppShell
+      header={{ height: 60 }}
+      navbar={{ width: 600, breakpoint: "sm" }}
+      padding="md"
+    >
       <AppShell.Header
         style={{
           boxShadow: "0 1px 12px rgba(0, 212, 255, 0.08)",
@@ -169,12 +173,12 @@ function App() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Main>
-        <Box maw={1600} mx="auto">
-          <Box mb="xl">
-            <AgentPanel onSelectAgent={setSelectedAgent} />
-          </Box>
+      <AppShell.Navbar>
+        <AgentPanel onSelectAgent={setSelectedAgent} />
+      </AppShell.Navbar>
 
+      <AppShell.Main>
+        <Box maw={2000} mx="auto">
           <Box mb="xl">
             <TaskLauncher agents={agents} graphData={graphData} onTaskCreated={handleTaskCreated} />
           </Box>
