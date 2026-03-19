@@ -14,20 +14,23 @@ Nodes:
     ``detect_disagreements``   → identifies structured divergence between frameworks
     ``scan_periphery``         → finds signals no framework cited
     ``generate_briefing``      → synthesizes final probability briefing
-    ``respond``                → formats output
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
+import openai
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +193,7 @@ class ProbabilityState(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# LLM helper
+# LLM helpers
 # ---------------------------------------------------------------------------
 
 async def _llm_call(system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
@@ -208,28 +211,66 @@ async def _llm_call(system_prompt: str, user_prompt: str, temperature: float = 0
     client = AsyncOpenAI(**openai_kwargs)
 
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=temperature,
-        max_completion_tokens=4096,
-        response_format={"type": "json_object"},
-    )
-    return resp.choices[0].message.content or "{}"
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=temperature,
+            max_completion_tokens=4096,
+            response_format={"type": "json_object"},
+        )
+        return resp.choices[0].message.content or "{}"
+    except openai.RateLimitError:
+        logger.warning("_llm_call rate limited")
+        raise
+    except openai.APIError as e:
+        logger.error("_llm_call API error: %s", e, exc_info=True)
+        raise
 
 
-def _parse_json_safe(text: str) -> Any:
+def _parse_json_safe(text: str, task_id: str = "") -> Any:
     """Parse JSON from LLM output, handling markdown fences."""
     text = text.strip()
+    candidates = [text]
     if text.startswith("```"):
-        # Remove markdown code fences
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines)
-    return json.loads(text)
+        candidates.append("\n".join(lines).strip())
+
+    for attempt in candidates:
+        try:
+            return json.loads(attempt)
+        except json.JSONDecodeError:
+            continue
+
+    logger.warning("_parse_json_safe could not parse response task_id=%s", task_id)
+    return {}
+
+
+def _build_scenario_adjustments(
+    assessments: list[dict[str, Any]],
+) -> dict[str, list[tuple[str, float]]]:
+    """Build a {scenario_name: [(framework, pp_change), ...]} dict from assessments."""
+    adjustments_by_scenario: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for assessment in assessments:
+        framework = assessment.get("framework_name", "unknown")
+        for adj in assessment.get("scenario_adjustments", []):
+            scenario = adj.get("scenario_name", "")
+            if not scenario:
+                continue
+            magnitude = MAGNITUDE_SCALE.get(adj.get("magnitude", "minor"), 1.5)
+            direction = adj.get("direction", "neutral")
+            if direction == "increase":
+                pp_change = magnitude
+            elif direction == "decrease":
+                pp_change = -magnitude
+            else:
+                pp_change = 0.0
+            adjustments_by_scenario[scenario].append((framework, pp_change))
+    return adjustments_by_scenario
 
 
 # ---------------------------------------------------------------------------
@@ -261,8 +302,13 @@ async def parse_assessments(state: ProbabilityState, config: RunnableConfig) -> 
         f"# Extraction Instructions\n\n{PARSE_OUTPUT_FORMAT}"
     )
 
-    raw = await _llm_call(PARSE_SYSTEM_PROMPT, user_prompt, temperature=0.1)
-    parsed = _parse_json_safe(raw)
+    try:
+        raw = await _llm_call(PARSE_SYSTEM_PROMPT, user_prompt, temperature=0.1)
+    except Exception as e:
+        logger.error("parse_assessments LLM call failed task_id=%s: %s", task_id, e)
+        return {"assessments": []}
+
+    parsed = _parse_json_safe(raw, task_id)
 
     # Handle both direct array and wrapped object
     if isinstance(parsed, list):
@@ -270,7 +316,7 @@ async def parse_assessments(state: ProbabilityState, config: RunnableConfig) -> 
     elif isinstance(parsed, dict) and "assessments" in parsed:
         assessments = parsed["assessments"]
     else:
-        assessments = [parsed]
+        assessments = [parsed] if parsed else []
 
     return {"assessments": assessments}
 
@@ -282,32 +328,10 @@ async def aggregate_probabilities(state: ProbabilityState, config: RunnableConfi
     executor.check_cancelled(task_id)
 
     assessments = state.get("assessments", [])
-
-    # Collect all adjustments by scenario
-    adjustments_by_scenario: dict[str, list[tuple[str, float]]] = defaultdict(list)
-    all_scenarios: set[str] = set()
-
-    for assessment in assessments:
-        framework = assessment.get("framework_name", "unknown")
-        for adj in assessment.get("scenario_adjustments", []):
-            scenario = adj.get("scenario_name", "")
-            if not scenario:
-                continue
-            all_scenarios.add(scenario)
-
-            magnitude = MAGNITUDE_SCALE.get(adj.get("magnitude", "minor"), 1.5)
-            direction = adj.get("direction", "neutral")
-            if direction == "increase":
-                pp_change = magnitude
-            elif direction == "decrease":
-                pp_change = -magnitude
-            else:
-                pp_change = 0.0
-
-            adjustments_by_scenario[scenario].append((framework, pp_change))
+    adjustments_by_scenario = _build_scenario_adjustments(assessments)
+    all_scenarios = set(adjustments_by_scenario.keys())
 
     # Calculate equal-weighted average per scenario
-    # Start with uniform distribution if no current probabilities provided
     num_scenarios = max(len(all_scenarios), 1)
     base_prob = (100.0 - DEFAULT_TAIL_RISK_RESERVE) / num_scenarios
 
@@ -352,24 +376,7 @@ async def detect_disagreements(state: ProbabilityState, config: RunnableConfig) 
     executor.check_cancelled(task_id)
 
     assessments = state.get("assessments", [])
-
-    # Collect adjustments by scenario for disagreement analysis
-    adjustments_by_scenario: dict[str, list[tuple[str, float]]] = defaultdict(list)
-    for assessment in assessments:
-        framework = assessment.get("framework_name", "unknown")
-        for adj in assessment.get("scenario_adjustments", []):
-            scenario = adj.get("scenario_name", "")
-            if not scenario:
-                continue
-            magnitude = MAGNITUDE_SCALE.get(adj.get("magnitude", "minor"), 1.5)
-            direction = adj.get("direction", "neutral")
-            if direction == "increase":
-                pp_change = magnitude
-            elif direction == "decrease":
-                pp_change = -magnitude
-            else:
-                pp_change = 0.0
-            adjustments_by_scenario[scenario].append((framework, pp_change))
+    adjustments_by_scenario = _build_scenario_adjustments(assessments)
 
     disagreements = []
     for scenario, adjustments in adjustments_by_scenario.items():
@@ -419,8 +426,12 @@ async def scan_periphery(state: ProbabilityState, config: RunnableConfig) -> dic
         f"by any analyst.\n\n{PERIPHERY_OUTPUT_FORMAT}"
     )
 
-    raw = await _llm_call(PERIPHERY_SYSTEM_PROMPT, user_prompt, temperature=0.3)
-    periphery = _parse_json_safe(raw)
+    try:
+        raw = await _llm_call(PERIPHERY_SYSTEM_PROMPT, user_prompt, temperature=0.3)
+        periphery = _parse_json_safe(raw, task_id)
+    except Exception as e:
+        logger.error("scan_periphery LLM call failed task_id=%s: %s", task_id, e)
+        periphery = {}
 
     return {"periphery": periphery}
 
@@ -457,22 +468,18 @@ async def generate_briefing(state: ProbabilityState, config: RunnableConfig) -> 
     ]
 
     user_prompt = "\n".join(context_parts)
-    raw = await _llm_call(BRIEFING_SYSTEM_PROMPT, user_prompt, temperature=0.3)
 
-    # Return the briefing as the final output (pretty-printed JSON)
     try:
-        briefing = _parse_json_safe(raw)
+        raw = await _llm_call(BRIEFING_SYSTEM_PROMPT, user_prompt, temperature=0.3)
+    except Exception as e:
+        logger.error("generate_briefing LLM call failed task_id=%s: %s", task_id, e)
+        return {"output": json.dumps({"error": str(e)})}
+
+    try:
+        briefing = _parse_json_safe(raw, task_id)
         return {"output": json.dumps(briefing, indent=2)}
     except json.JSONDecodeError:
         return {"output": raw}
-
-
-async def respond(state: ProbabilityState, config: RunnableConfig) -> dict[str, Any]:
-    """Final node — output is already set by generate_briefing."""
-    executor = config["configurable"]["executor"]
-    task_id = config["configurable"]["task_id"]
-    executor.check_cancelled(task_id)
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +496,6 @@ def build_probability_graph() -> StateGraph:
     graph.add_node("detect_disagreements", detect_disagreements)
     graph.add_node("scan_periphery", scan_periphery)
     graph.add_node("generate_briefing", generate_briefing)
-    graph.add_node("respond", respond)
 
     graph.set_entry_point("receive")
     graph.add_edge("receive", "parse_assessments")
@@ -504,7 +510,6 @@ def build_probability_graph() -> StateGraph:
     graph.add_edge("detect_disagreements", "generate_briefing")
     graph.add_edge("scan_periphery", "generate_briefing")
 
-    graph.add_edge("generate_briefing", "respond")
-    graph.add_edge("respond", END)
+    graph.add_edge("generate_briefing", END)
 
     return graph.compile()

@@ -12,12 +12,16 @@ Nodes:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, TypedDict
 
+import openai
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from langgraph.types import RetryPolicy
+
+logger = logging.getLogger(__name__)
 
 
 class RelevancyState(TypedDict):
@@ -36,10 +40,7 @@ async def parse_input(state: RelevancyState, config: RunnableConfig) -> dict[str
 
     try:
         data = json.loads(state["input"])
-        return {
-            "text": data.get("text", ""),
-            "question": data.get("question", ""),
-        }
+        return {"text": data.get("text", ""), "question": data.get("question", "")}
     except json.JSONDecodeError:
         return {"text": state["input"], "question": ""}
 
@@ -61,27 +62,31 @@ async def check_relevancy(state: RelevancyState, config: RunnableConfig) -> dict
 
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a relevancy assessment tool. Given a piece of text and a question, "
-                    "determine whether the text is relevant to answering the question.\n\n"
-                    "You MUST respond with ONLY a JSON object in this exact format:\n"
-                    '{"relevant": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}\n\n'
-                    "Do not include any text outside the JSON object."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Text:\n{state['text']}\n\nQuestion:\n{state['question']}",
-            },
-        ],
-        temperature=0.1,
-        max_completion_tokens=2048,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a relevancy assessment tool. Given a piece of text and a question, "
+                        "determine whether the text is relevant to answering the question.\n\n"
+                        "You MUST respond with ONLY a JSON object in this exact format:\n"
+                        '{"relevant": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}\n\n'
+                        "Do not include any text outside the JSON object."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Text:\n{state['text']}\n\nQuestion:\n{state['question']}",
+                },
+            ],
+            temperature=0.1,
+            max_completion_tokens=2048,
+        )
+    except openai.APIError as e:
+        logger.warning("Relevancy LLM call failed (will retry) task_id=%s: %s", task_id, e)
+        raise
     raw = response.choices[0].message.content
     try:
         parsed = json.loads(raw)
@@ -100,34 +105,6 @@ async def check_relevancy(state: RelevancyState, config: RunnableConfig) -> dict
         }
 
     return {"output": json.dumps(result, indent=2)}
-
-
-# async def format_response(state: RelevancyState, config: RunnableConfig) -> dict[str, Any]:
-#     """Parse the LLM response into structured JSON output."""
-#     executor = config["configurable"]["executor"]
-#     task_id = config["configurable"]["task_id"]
-#     executor.check_cancelled(task_id)
-
-#     raw = state["llm_response"].strip()
-
-#     # Try to parse JSON from the LLM response
-#     try:
-#         parsed = json.loads(raw)
-#         result = {
-#             "relevant": bool(parsed.get("relevant", False)),
-#             "confidence": float(parsed.get("confidence", 0.0)),
-#             "reasoning": str(parsed.get("reasoning", "")),
-#             "error": False
-#         }
-#     except (json.JSONDecodeError, ValueError):
-#         result = {
-#             "relevant": False,
-#             "confidence": 0.0,
-#             "reasoning": f"Failed to parse LLM response: {raw}",
-#             "error": True
-#         }
-
-#     return {"output": json.dumps(result, indent=2)}
 
 
 def build_relevancy_graph() -> StateGraph:
