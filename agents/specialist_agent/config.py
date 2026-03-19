@@ -51,7 +51,10 @@ def load_specialist_configs(directory: Path) -> list[SpecialistConfig]:
 
     for path in yaml_files:
         with open(path, "r", encoding="utf-8") as f:
-            data: dict[str, Any] = yaml.safe_load(f) or {}
+            try:
+                data: dict[str, Any] = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                raise ValueError(f"Invalid YAML in {path}: {e}") from e
 
         # Required fields
         name = data.get("name")

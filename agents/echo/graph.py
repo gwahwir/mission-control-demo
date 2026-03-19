@@ -66,7 +66,10 @@ async def forward_downstream(state: EchoState, config: RunnableConfig) -> dict[s
         text = parts[0].get("text", "") if parts else state["processed"]
         return {"processed": text}
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass  # cleanup failure should not hide the original error
 
 
 def respond(state: EchoState, config: RunnableConfig) -> dict[str, Any]:
