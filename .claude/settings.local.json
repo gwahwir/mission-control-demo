@@ -27,7 +27,9 @@
       "Bash(git commit:*)",
       "Bash(find:*)",
       "Bash(wc:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(pytest:*)"
     ]
   }
 }
