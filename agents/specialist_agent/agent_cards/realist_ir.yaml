@@ -21,7 +21,7 @@ skills:
   - id: realist-ir-analysis
     name: Realist IR Analysis
     description: Analyzes geopolitical scenarios through realist power politics and security dilemma frameworks
-    tags: [analysis, realism, geopolitics, security]
+    tags: [specialist, analysis, realism, geopolitics, security]
 
 input_fields:
   - name: text

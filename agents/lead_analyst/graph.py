@@ -135,6 +135,11 @@ class LeadAnalystState(TypedDict):
     # operator.add merges lists from parallel branches.
     results: Annotated[list[tuple[str, str]], operator.add]
     output: str
+    # Populated by discover_and_select, consumed by route_to_specialists
+    selected_specialists: list[dict[str, str]]
+    # Per-branch state injected via Send API
+    _spec_label: str
+    _spec_url: str
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +191,163 @@ def _make_sub_agent_node(sa: SubAgentConfig):
     node.__name__ = sa.node_id
     node.__qualname__ = sa.node_id
     return node
+
+
+# ---------------------------------------------------------------------------
+# Dynamic discovery helpers
+# ---------------------------------------------------------------------------
+
+async def _fetch_agents(control_plane_url: str) -> list[dict]:
+    """GET /agents from the control plane and return the JSON list."""
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{control_plane_url.rstrip('/')}/agents")
+        r.raise_for_status()
+        return r.json()
+
+
+def _filter_online_specialists(agents: list[dict]) -> list[dict]:
+    """Return candidates: online agents with 'specialist' in any skill tag."""
+    result = []
+    for agent in agents:
+        if agent.get("status") != "online":
+            continue
+        if not any("specialist" in skill.get("tags", []) for skill in agent.get("skills", [])):
+            continue
+        online_instances = [
+            i for i in agent.get("instances", []) if i.get("status") == "online"
+        ]
+        if not online_instances:
+            continue
+        result.append({
+            "label": agent["name"],
+            "url": online_instances[0]["url"],
+            "description": agent.get("description", ""),
+        })
+    return result
+
+
+async def _select_specialists_with_llm(
+    input_text: str,
+    candidates: list[dict],
+    min_specialists: int,
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    """Ask an LLM to pick the most relevant specialists for the given input."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("No OPENAI_API_KEY — cannot use LLM selection")
+
+    from langfuse.openai import AsyncOpenAI
+
+    openai_kwargs: dict[str, Any] = {"api_key": api_key}
+    base_url = os.getenv("OPENAI_BASE_URL")
+    if base_url:
+        openai_kwargs["base_url"] = base_url
+    client = AsyncOpenAI(**openai_kwargs)
+    effective_model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    candidate_lines = "\n".join(
+        f"- {c['label']}: {c['description']}" for c in candidates
+    )
+    prompt = (
+        f"You are selecting analytical specialists for the following intelligence task:\n\n"
+        f"{input_text}\n\n"
+        f"Available specialists:\n{candidate_lines}\n\n"
+        f"Select at least {min_specialists} specialists most relevant and complementary for "
+        f"this task. Return ONLY a JSON array of their exact names, e.g. "
+        f'["Specialist A", "Specialist B", "Specialist C"]. '
+        f"Return the JSON array and nothing else."
+    )
+
+    resp = await client.chat.completions.create(
+        model=effective_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_completion_tokens=256,
+        name="specialist_selector",
+    )
+    raw = (resp.choices[0].message.content or "").strip()
+    selected_names: list[str] = json.loads(raw)
+    name_to_candidate = {c["label"]: c for c in candidates}
+    return [
+        {"label": name, "url": name_to_candidate[name]["url"]}
+        for name in selected_names
+        if name in name_to_candidate
+    ]
+
+
+def _make_discover_node(control_plane_url: str, min_specialists: int):
+    """Return an async LangGraph node that discovers and selects specialists at runtime."""
+
+    async def discover_and_select(
+        state: LeadAnalystState, config: RunnableConfig
+    ) -> dict[str, Any]:
+        executor = config["configurable"]["executor"]
+        task_id = config["configurable"]["task_id"]
+        executor.check_cancelled(task_id)
+
+        agents = await _fetch_agents(control_plane_url)
+        candidates = _filter_online_specialists(agents)
+
+        if len(candidates) < min_specialists:
+            raise RuntimeError(
+                f"Discovery found only {len(candidates)} online specialist(s); "
+                f"min_specialists={min_specialists}. "
+                "Ensure specialists have the 'specialist' skill tag and are reachable."
+            )
+
+        try:
+            selected = await _select_specialists_with_llm(
+                state["input"], candidates, min_specialists
+            )
+            if len(selected) < min_specialists:
+                raise ValueError(f"LLM returned {len(selected)} < {min_specialists} specialists")
+        except Exception as exc:
+            logger.warning(
+                "Specialist LLM selection failed (task=%s), falling back to first %d: %s",
+                task_id, min_specialists, exc,
+            )
+            selected = [{"label": c["label"], "url": c["url"]} for c in candidates[:min_specialists]]
+
+        logger.info(
+            "discover_and_select task=%s selected=%s",
+            task_id, [s["label"] for s in selected],
+        )
+        return {"selected_specialists": selected}
+
+    discover_and_select.__name__ = "discover_and_select"
+    discover_and_select.__qualname__ = "discover_and_select"
+    return discover_and_select
+
+
+async def call_specialist(
+    state: LeadAnalystState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Shared node invoked once per specialist via Send. Reads _spec_label/_spec_url."""
+    executor = config["configurable"]["executor"]
+    task_id = config["configurable"]["task_id"]
+    executor.check_cancelled(task_id)
+
+    label = state["_spec_label"]
+    url = state["_spec_url"]
+    context_id = config["configurable"].get("context_id")
+
+    try:
+        text = await _call_sub_agent(url, state["input"], context_id=context_id, parent_span_id=task_id)
+    except Exception as exc:
+        text = f"[Error calling {label}: {exc}]"
+
+    return {"results": [(label, text)]}
+
+
+def route_to_specialists(state: LeadAnalystState) -> list:
+    """Conditional edge: create one Send('call_specialist', ...) per selected specialist."""
+    from langgraph.types import Send
+    return [
+        Send("call_specialist", {**state, "_spec_label": s["label"], "_spec_url": s["url"]})
+        for s in state.get("selected_specialists", [])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +493,10 @@ def build_lead_analyst_graph(
     model: str | None = None,
     temperature: float = 0.3,
     max_completion_tokens: int = 4096,
-    name: str = ""
+    name: str = "",
+    dynamic_discovery: bool = False,
+    control_plane_url: str | None = None,
+    min_specialists: int = 3,
 ) -> StateGraph:
     """Build and compile the lead analyst graph."""
     graph = StateGraph(LeadAnalystState)
@@ -341,18 +506,28 @@ def build_lead_analyst_graph(
         _make_aggregate_node(aggregation_prompt, model, temperature, max_completion_tokens, name),
     )
     graph.add_node("respond", respond)
-
-    # Dynamically add one node per sub-agent, all fanning out from receive
-    for sa in sub_agents:
-        graph.add_node(sa.node_id, _make_sub_agent_node(sa))
-        graph.add_edge("receive", sa.node_id)
-        graph.add_edge(sa.node_id, "aggregate")
-
-    # If no sub-agents configured, wire receive directly to aggregate
-    if not sub_agents:
-        graph.add_edge("receive", "aggregate")
-
     graph.set_entry_point("receive")
     graph.add_edge("aggregate", "respond")
     graph.add_edge("respond", END)
+
+    if dynamic_discovery:
+        effective_cp_url = control_plane_url or os.getenv("CONTROL_PLANE_URL", "")
+        if not effective_cp_url:
+            raise ValueError(
+                "dynamic_discovery=True requires control_plane_url in YAML "
+                "or CONTROL_PLANE_URL environment variable"
+            )
+        graph.add_node("discover_and_select", _make_discover_node(effective_cp_url, min_specialists))
+        graph.add_node("call_specialist", call_specialist)
+        graph.add_edge("receive", "discover_and_select")
+        graph.add_conditional_edges("discover_and_select", route_to_specialists, ["call_specialist"])
+        graph.add_edge("call_specialist", "aggregate")
+    else:
+        for sa in sub_agents:
+            graph.add_node(sa.node_id, _make_sub_agent_node(sa))
+            graph.add_edge("receive", sa.node_id)
+            graph.add_edge(sa.node_id, "aggregate")
+        if not sub_agents:
+            graph.add_edge("receive", "aggregate")
+
     return graph.compile()

@@ -21,7 +21,7 @@ skills:
   - id: bilahari-kausikan-analysis
     name: Small State Strategy Analysis
     description: Analyzes scenarios through small state diplomacy and clinical realism
-    tags: [analysis, small-state, diplomacy, realism]
+    tags: [specialist, analysis, small-state, diplomacy, realism]
 
 input_fields:
   - name: text

@@ -21,7 +21,7 @@ skills:
   - id: copenhagen-securitization-analysis
     name: Securitization Analysis
     description: Analyzes how issues are securitized through discourse, speech acts, and audience acceptance
-    tags: [analysis, securitization, discourse, copenhagen]
+    tags: [specialist, analysis, securitization, discourse, copenhagen]
 
 input_fields:
   - name: text

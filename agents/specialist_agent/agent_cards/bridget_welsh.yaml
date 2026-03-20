@@ -21,7 +21,7 @@ skills:
   - id: bridget-welsh-analysis
     name: Malaysian Political Analysis
     description: Analyzes Malaysian and Southeast Asian political dynamics, electoral patterns, and democratization
-    tags: [analysis, malaysia, politics, elections]
+    tags: [specialist, analysis, malaysia, politics, elections]
 
 input_fields:
   - name: text

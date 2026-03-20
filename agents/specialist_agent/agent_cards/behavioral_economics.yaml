@@ -21,7 +21,7 @@ skills:
   - id: behavioral-economics-analysis
     name: Behavioral Economics Analysis
     description: Analyzes scenarios for cognitive biases, framing effects, and decision-making patterns
-    tags: [analysis, behavioral-economics, biases, decision-making]
+    tags: [specialist, analysis, behavioral-economics, biases, decision-making]
 
 input_fields:
   - name: text
