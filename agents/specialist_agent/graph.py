@@ -40,7 +40,6 @@ def build_specialist_graph(
         """Call the LLM with the specialist's system prompt."""
         executor = config["configurable"]["executor"]
         task_id = config["configurable"]["task_id"]
-        context_id = config["configurable"].get("context_id")
         executor.check_cancelled(task_id)
 
         from langfuse.openai import AsyncOpenAI
@@ -67,8 +66,6 @@ def build_specialist_graph(
                 ],
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
-                trace_id=task_id.replace("-", "")[0:32] if task_id else None,
-                parent_observation_id=context_id.replace("-", "")[0:16] if context_id else None,
                 name=name,
             )
             return {"response": resp.choices[0].message.content or ""}

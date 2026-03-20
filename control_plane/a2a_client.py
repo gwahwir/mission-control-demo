@@ -16,7 +16,7 @@ import httpx
 class A2AClient:
     """Async client that talks A2A JSON-RPC to agent servers."""
 
-    def __init__(self, base_url: str, timeout: float = 30) -> None:
+    def __init__(self, base_url: str, timeout: float = 300) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout)
         self._request_id = 0
@@ -31,6 +31,7 @@ class A2AClient:
         *,
         task_id: str | None = None,
         context_id: str | None = None,
+        parent_span_id: str | None = None,
     ) -> dict[str, Any]:
         """Send a message/send JSON-RPC request and return the result."""
         message: dict[str, Any] = {
@@ -41,6 +42,8 @@ class A2AClient:
         }
         if context_id:
             message["contextId"] = context_id
+        if parent_span_id:
+            message["metadata"] = {"parentSpanId": parent_span_id}
 
         params: dict[str, Any] = {"message": message}
         if task_id:
@@ -83,6 +86,7 @@ class A2AClient:
         *,
         task_id: str | None = None,
         context_id: str | None = None,
+        parent_span_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Send message/stream and yield SSE events."""
         message: dict[str, Any] = {
@@ -95,6 +99,8 @@ class A2AClient:
             message["taskId"] = task_id
         if context_id:
             message["contextId"] = context_id
+        if parent_span_id:
+            message["metadata"] = {"parentSpanId": parent_span_id}
 
         payload = {
             "jsonrpc": "2.0",

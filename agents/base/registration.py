@@ -41,7 +41,9 @@ async def register_with_control_plane(type_name: str, agent_url: str) -> None:
             print(f"[registration] Attempt {attempt + 1} failed ({e}), retrying in {wait}s...")
             await asyncio.sleep(wait)
 
-    print("[registration] WARNING: Failed to register after 5 attempts")
+    raise RuntimeError(
+        f"[registration] Failed to register with control plane at {cp_url} after 5 attempts — aborting startup"
+    )
 
 
 async def deregister_from_control_plane(type_name: str, agent_url: str) -> None:

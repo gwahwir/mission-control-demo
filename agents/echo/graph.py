@@ -59,7 +59,7 @@ async def forward_downstream(state: EchoState, config: RunnableConfig) -> dict[s
 
     client = A2AClient(downstream_url)
     try:
-        result = await client.send_message(state["processed"], context_id=context_id)
+        result = await client.send_message(state["processed"], context_id=context_id, parent_span_id=task_id)
         status = result.get("status", {})
         msg = status.get("message", {})
         parts = msg.get("parts", [])

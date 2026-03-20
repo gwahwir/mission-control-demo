@@ -1,4 +1,4 @@
-name: Lead Analyst Agent B
+name: Lead Analyst Agent B - Local Dev
 description: >
   Orchestrator agent that fans out work to downstream sub-agents
   via A2A, collects their results, and returns a synthesized analysis.

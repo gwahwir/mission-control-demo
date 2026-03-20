@@ -129,6 +129,15 @@ class LangGraphA2AExecutor(AgentExecutor, CancellableMixin):
         context_id = context.context_id or str(uuid.uuid4())
         self.register_task(task_id)
 
+        # Extract parent span ID from A2A message metadata (set by calling agent)
+        parent_span_id: str | None = None
+        if context.message and context.message.metadata:
+            parent_span_id = context.message.metadata.get("parentSpanId")
+
+        from agents.base.tracing import build_langfuse_handler
+        langfuse_handler, langfuse_client = build_langfuse_handler(context_id, parent_span_id)
+        callbacks = [langfuse_handler] if langfuse_handler else []
+
         try:
             # Signal: working
             await self._emit_status(
@@ -141,7 +150,10 @@ class LangGraphA2AExecutor(AgentExecutor, CancellableMixin):
             result: dict[str, Any] = {}
             async for event in self.graph.astream(
                 graph_input,
-                config={"configurable": {"executor": self, "task_id": task_id, "context_id": context_id}},
+                config={
+                    "configurable": {"executor": self, "task_id": task_id, "context_id": context_id},
+                    "callbacks": callbacks,
+                },
                 stream_mode="updates",
             ):
                 # Each event is {node_name: state_update}
@@ -204,6 +216,8 @@ class LangGraphA2AExecutor(AgentExecutor, CancellableMixin):
                 final=True,
             )
         finally:
+            if langfuse_client:
+                await asyncio.to_thread(langfuse_client.flush)
             self.cleanup_task(task_id)
 
     async def cancel(

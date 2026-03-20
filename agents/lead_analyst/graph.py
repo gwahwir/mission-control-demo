@@ -141,13 +141,18 @@ class LeadAnalystState(TypedDict):
 # A2A helper
 # ---------------------------------------------------------------------------
 
-async def _call_sub_agent(url: str, text: str, context_id: str | None = None) -> str:
+async def _call_sub_agent(
+    url: str,
+    text: str,
+    context_id: str | None = None,
+    parent_span_id: str | None = None,
+) -> str:
     """Call a downstream sub-agent via A2A and return the output text."""
     from control_plane.a2a_client import A2AClient
 
     client = A2AClient(url, timeout=300)
     try:
-        result = await client.send_message(text, context_id=context_id)
+        result = await client.send_message(text, context_id=context_id, parent_span_id=parent_span_id)
         status = result.get("status", {})
         msg = status.get("message", {})
         parts = msg.get("parts", [])
@@ -171,7 +176,7 @@ def _make_sub_agent_node(sa: SubAgentConfig):
         context_id = config["configurable"].get("context_id")
 
         try:
-            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id)
+            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id, parent_span_id=task_id)
         except Exception as exc:
             text = f"[Error calling {sa.label}: {exc}]"
 
