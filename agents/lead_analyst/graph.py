@@ -136,6 +136,8 @@ class LeadAnalystState(TypedDict):
     output: str
     # Populated by discover_and_select, consumed by route_to_specialists
     selected_specialists: list[dict[str, str]]
+    # Maps specialist label → reason it was selected; included in aggregation prompt
+    selection_reasoning: dict[str, str]
     # Per-branch state injected via Send API
     _spec_label: str
     _spec_url: str
@@ -179,10 +181,25 @@ def _make_sub_agent_node(sa: SubAgentConfig):
 
         context_id = config["configurable"].get("context_id")
 
+        lf_span = None
+        parent_span_id: str | None = None
+        if os.getenv("LANGFUSE_PUBLIC_KEY"):
+            from langfuse import Langfuse
+            from langfuse.types import TraceContext
+            lf_span = Langfuse().start_observation(
+                trace_context=TraceContext(trace_id=context_id.replace("-", "") if context_id else ""),
+                name="call_sub_agent",
+                input={"agent": sa.label},
+            )
+            parent_span_id = lf_span.id
+
         try:
-            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id, parent_span_id=task_id)
+            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id, parent_span_id=parent_span_id)
         except Exception as exc:
             text = f"[Error calling {sa.label}: {exc}]"
+        finally:
+            if lf_span:
+                lf_span.end()
 
         return {"results": [(sa.label, text)]}
 
@@ -226,13 +243,64 @@ def _filter_online_specialists(agents: list[dict]) -> list[dict]:
     return result
 
 
+def _validate_llm_selection(
+    raw: str,
+    name_to_candidate: dict[str, dict],
+    min_specialists: int,
+) -> list[dict]:
+    """Parse and validate LLM selection output.
+
+    Raises ``ValueError`` with a descriptive message if the response:
+    - is not valid JSON
+    - is not a JSON array
+    - contains items missing ``name`` or ``reasoning``
+    - references unknown specialist names
+    - returns fewer than ``min_specialists`` valid items
+    """
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Not valid JSON: {exc}") from exc
+
+    if not isinstance(parsed, list):
+        raise ValueError(f"Expected a JSON array, got {type(parsed).__name__}")
+
+    valid: list[dict] = []
+    for i, item in enumerate(parsed):
+        if not isinstance(item, dict):
+            raise ValueError(f"Item {i} is not an object: {item!r}")
+        name = item.get("name", "").strip()
+        reasoning = item.get("reasoning", "").strip()
+        if not name:
+            raise ValueError(f"Item {i} is missing a non-empty 'name'")
+        if not reasoning:
+            raise ValueError(f"Item {i} ({name!r}) is missing a non-empty 'reasoning'")
+        if name not in name_to_candidate:
+            raise ValueError(f"Item {i} references unknown specialist {name!r}")
+        valid.append(item)
+
+    if len(valid) < min_specialists:
+        raise ValueError(
+            f"Only {len(valid)} valid specialist(s) returned; need at least {min_specialists}"
+        )
+
+    return valid
+
+
 async def _select_specialists_with_llm(
     input_text: str,
     candidates: list[dict],
     min_specialists: int,
     model: str | None = None,
+    max_retries: int = 3,
 ) -> list[dict[str, str]]:
-    """Ask an LLM to pick the most relevant specialists for the given input."""
+    """Ask an LLM to pick the most relevant specialists for the given input.
+
+    Retries up to ``max_retries`` times if the response is not a valid JSON
+    array or any item is missing ``reasoning``.  On each retry the bad
+    response and the validation error are fed back to the model so it can
+    self-correct.
+    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("No OPENAI_API_KEY — cannot use LLM selection")
@@ -246,34 +314,67 @@ async def _select_specialists_with_llm(
     client = AsyncOpenAI(**openai_kwargs)
     effective_model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+    name_to_candidate = {c["label"]: c for c in candidates}
     candidate_lines = "\n".join(
         f"- {c['label']}: {c['description']}" for c in candidates
     )
-    prompt = (
+    system_prompt = (
         f"You are selecting analytical specialists for the following intelligence task:\n\n"
         f"{input_text}\n\n"
         f"Available specialists:\n{candidate_lines}\n\n"
         f"Select at least {min_specialists} specialists most relevant and complementary for "
-        f"this task. Return ONLY a JSON array of their exact names, e.g. "
-        f'["Specialist A", "Specialist B", "Specialist C"]. '
+        f"this task. For each selected specialist, provide a concise reason (1-2 sentences) "
+        f"explaining why they are suited to this specific task.\n\n"
+        f"Return ONLY a JSON array of objects with 'name' and 'reasoning' fields, e.g. "
+        f'[{{"name": "Specialist A", "reasoning": "Chosen because..."}}]. '
         f"Return the JSON array and nothing else."
     )
 
-    resp = await client.chat.completions.create(
-        model=effective_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_completion_tokens=256,
-        name="specialist_selector",
+    messages: list[dict[str, str]] = [{"role": "user", "content": system_prompt}]
+    last_exc: Exception = RuntimeError("No attempts made")
+
+    for attempt in range(max_retries):
+        resp = await client.chat.completions.create(
+            model=effective_model,
+            messages=messages,
+            temperature=0.0,
+            max_completion_tokens=1024,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+
+        try:
+            valid_items = _validate_llm_selection(raw, name_to_candidate, min_specialists)
+        except ValueError as exc:
+            last_exc = exc
+            logger.warning(
+                "LLM selection attempt %d/%d failed validation: %s",
+                attempt + 1, max_retries, exc,
+            )
+            if attempt < max_retries - 1:
+                # Feed the bad response + error back so the model can self-correct
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your previous response was invalid: {exc}. "
+                        "Please correct it and return only the JSON array with "
+                        "'name' and 'reasoning' fields for each specialist."
+                    ),
+                })
+            continue
+
+        return [
+            {
+                "label": item["name"],
+                "url": name_to_candidate[item["name"]]["url"],
+                "reasoning": item["reasoning"],
+            }
+            for item in valid_items
+        ]
+
+    raise ValueError(
+        f"LLM selection failed after {max_retries} attempt(s): {last_exc}"
     )
-    raw = (resp.choices[0].message.content or "").strip()
-    selected_names: list[str] = json.loads(raw)
-    name_to_candidate = {c["label"]: c for c in candidates}
-    return [
-        {"label": name, "url": name_to_candidate[name]["url"]}
-        for name in selected_names
-        if name in name_to_candidate
-    ]
 
 
 def _make_discover_node(control_plane_url: str, min_specialists: int):
@@ -307,13 +408,14 @@ def _make_discover_node(control_plane_url: str, min_specialists: int):
                 "Specialist LLM selection failed (task=%s), falling back to first %d: %s",
                 task_id, min_specialists, exc,
             )
-            selected = [{"label": c["label"], "url": c["url"]} for c in candidates[:min_specialists]]
+            selected = [{"label": c["label"], "url": c["url"], "reasoning": ""} for c in candidates[:min_specialists]]
 
         logger.info(
             "discover_and_select task=%s selected=%s",
             task_id, [s["label"] for s in selected],
         )
-        return {"selected_specialists": selected}
+        selection_reasoning = {s["label"]: s.get("reasoning", "") for s in selected}
+        return {"selected_specialists": selected, "selection_reasoning": selection_reasoning}
 
     discover_and_select.__name__ = "discover_and_select"
     discover_and_select.__qualname__ = "discover_and_select"
@@ -332,10 +434,25 @@ async def call_specialist(
     url = state["_spec_url"]
     context_id = config["configurable"].get("context_id")
 
+    lf_span = None
+    parent_span_id: str | None = None
+    if os.getenv("LANGFUSE_PUBLIC_KEY"):
+        from langfuse import Langfuse
+        from langfuse.types import TraceContext
+        lf_span = Langfuse().start_observation(
+            trace_context=TraceContext(trace_id=context_id.replace("-", "") if context_id else ""),
+            name="call_specialist",
+            input={"specialist": label},
+        )
+        parent_span_id = lf_span.id
+
     try:
-        text = await _call_sub_agent(url, state["input"], context_id=context_id, parent_span_id=task_id)
+        text = await _call_sub_agent(url, state["input"], context_id=context_id, parent_span_id=parent_span_id)
     except Exception as exc:
         text = f"[Error calling {label}: {exc}]"
+    finally:
+        if lf_span:
+            lf_span.end()
 
     return {"results": [(label, text)]}
 
@@ -357,10 +474,14 @@ def receive(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
     executor = config["configurable"]["executor"]
     task_id = config["configurable"]["task_id"]
     executor.check_cancelled(task_id)
-    return {"results": []}
+    return {"results": [], "selection_reasoning": {}}
 
 
-def _build_aggregation_prompt(input_text: str, results: list[tuple[str, str]]) -> str:
+def _build_aggregation_prompt(
+    input_text: str,
+    results: list[tuple[str, str]],
+    selection_reasoning: dict[str, str] | None = None,
+) -> str:
     """Build the user prompt for the aggregation LLM call."""
     parts = [
         "# META-ANALYSIS TASK",
@@ -368,9 +489,17 @@ def _build_aggregation_prompt(input_text: str, results: list[tuple[str, str]]) -
         "## Original Request:",
         input_text,
         "",
-        "## Individual Analyses:",
-        "",
     ]
+
+    if selection_reasoning:
+        active_reasoning = {k: v for k, v in selection_reasoning.items() if v}
+        if active_reasoning:
+            parts.extend(["## Specialist Selection Rationale:", ""])
+            for label, reasoning in active_reasoning.items():
+                parts.append(f"- **{label}**: {reasoning}")
+            parts.extend(["", "---", ""])
+
+    parts.extend(["## Individual Analyses:", ""])
 
     for i, (label, text) in enumerate(results, 1):
         try:
@@ -440,7 +569,7 @@ def _make_aggregate_node(
             sections = [f"=== {label} ===\n{text}" for label, text in results]
             return {"output": "\n\n".join(sections)}
 
-        user_prompt = _build_aggregation_prompt(state["input"], results)
+        user_prompt = _build_aggregation_prompt(state["input"], results, state.get("selection_reasoning"))
 
         from openai import AsyncOpenAI
 
@@ -460,7 +589,6 @@ def _make_aggregate_node(
                 ],
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
-                name=name,
             )
             return {"output": resp.choices[0].message.content or ""}
         except openai.APIError as e:

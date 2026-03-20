@@ -20,6 +20,9 @@ from control_plane.pubsub import InMemoryBroker, RedisBroker
 from control_plane.registry import AgentRegistry
 from control_plane.routes import init_routes, router
 from control_plane.task_store import PostgresTaskStore, TaskStore
+from dotenv import load_dotenv
+
+load_dotenv()
 
 configure_logging(log_level=os.getenv("LOG_LEVEL", "INFO"))
 logger = get_logger(__name__)

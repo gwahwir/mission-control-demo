@@ -21,7 +21,7 @@ skills:
   - id: peripheral-scan-analysis
     name: Peripheral Scan Analysis
     description: Identifies overlooked signals, blind spots, and uncited intelligence in existing analysis
-    tags: [specialist, analysis, peripheral, blind-spots, signals]
+    tags: [specialist_L2, analysis, peripheral, blind-spots, signals]
 
 input_fields:
   - name: text

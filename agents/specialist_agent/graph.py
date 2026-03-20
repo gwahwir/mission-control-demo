@@ -66,7 +66,6 @@ def build_specialist_graph(
                 ],
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
-                name=name,
             )
             return {"response": resp.choices[0].message.content or ""}
         except openai.RateLimitError as e:

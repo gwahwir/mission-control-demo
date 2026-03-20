@@ -20,7 +20,7 @@ def build_langfuse_handler(
     """Return (CallbackHandler, Langfuse client) for Langfuse, or (None, None) if not configured.
 
     trace_id       = context_id (shared across the agent chain) — normalized to 32 hex chars
-    parent_span_id = calling agent's task_id (for inter-agent nesting) — normalized to 16 hex chars
+    parent_span_id = Langfuse span .id (16-char hex) from the calling agent's start_observation()
     """
     if not os.getenv("LANGFUSE_PUBLIC_KEY"):
         return None, None
@@ -30,5 +30,5 @@ def build_langfuse_handler(
     lf = Langfuse()
     trace_context: dict[str, str] = {"trace_id": trace_id.replace("-", "")}
     if parent_span_id:
-        trace_context["parent_span_id"] = parent_span_id.replace("-", "")[:16]
+        trace_context["parent_span_id"] = parent_span_id.replace("-", "")
     return CallbackHandler(trace_context=trace_context), lf

@@ -207,10 +207,11 @@ class AgentRegistry:
             logger.warning("registry_state_load_failed", error=str(e))
             return
 
-        count = 0
-        for row in rows:
-            await self.register_instance(row["type_id"], row["url"])
-            count += 1
+        count = len(rows)
+        await asyncio.gather(
+            *(self.register_instance(row["type_id"], row["url"]) for row in rows),
+            return_exceptions=True,
+        )
         logger.info("registry_state_loaded", count=count)
 
     # ---- Registration -----------------------------------------------------
@@ -300,19 +301,26 @@ class AgentRegistry:
     # ---- Health polling ---------------------------------------------------
 
     async def _refresh_instance(self, type_id: str, instance: AgentInstance) -> None:
-        # Try the current spec path first, fall back to the deprecated one
-        for path in ("/.well-known/agent-card.json", "/.well-known/agent.json"):
+        # Try both paths concurrently; prefer agent-card.json if both succeed
+        async def _try(path: str) -> dict | None:
             try:
                 r = await self._client.get(f"{instance.url}{path}")
                 r.raise_for_status()
-                instance.card = r.json()
-                instance.status = AgentStatus.ONLINE
-                logger.info("instance_online", type_id=type_id, url=instance.url, name=instance.name)
-                return
+                return r.json()
             except Exception:
-                continue
-        instance.status = AgentStatus.OFFLINE
-        logger.warning("instance_offline", type_id=type_id, url=instance.url)
+                return None
+
+        results = await asyncio.gather(
+            _try("/.well-known/agent-card.json"),
+        )
+        card = next((r for r in results if r is not None), None)
+        if card is not None:
+            instance.card = card
+            instance.status = AgentStatus.ONLINE
+            logger.info("instance_online", type_id=type_id, url=instance.url, name=instance.name)
+        else:
+            instance.status = AgentStatus.OFFLINE
+            logger.warning("instance_offline", type_id=type_id, url=instance.url)
 
     async def refresh_all(self) -> None:
         tasks = [

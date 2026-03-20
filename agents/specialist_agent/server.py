@@ -18,6 +18,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -127,14 +128,15 @@ def _mount_specialist(app: FastAPI, config: SpecialistConfig, base_url: str) -> 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    base_url = _get_base_url()
-    # Register each specialist independently
-    for spec in _specialists:
-        await register_with_control_plane(spec["type_id"], spec["url"])
+    # Register all specialists concurrently
+    await asyncio.gather(
+        *[register_with_control_plane(spec["type_id"], spec["url"]) for spec in _specialists]
+    )
     yield
-    # Deregister all on shutdown
-    for spec in _specialists:
-        await deregister_from_control_plane(spec["type_id"], spec["url"])
+    # Deregister all concurrently on shutdown
+    await asyncio.gather(
+        *[deregister_from_control_plane(spec["type_id"], spec["url"]) for spec in _specialists]
+    )
 
 
 def create_app() -> FastAPI:

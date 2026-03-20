@@ -21,7 +21,7 @@ skills:
   - id: ach-red-team-analysis
     name: ACH Red Team Analysis
     description: Challenges assumptions, generates competing hypotheses, and identifies analytical blind spots
-    tags: [specialist, analysis, red-team, ach, critical-thinking]
+    tags: [specialist_L3, analysis, red-team, ach, critical-thinking]
 
 input_fields:
   - name: text
