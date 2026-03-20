@@ -21,7 +21,7 @@ skills:
   - id: climate-security-analysis
     name: Climate Security Analysis
     description: Analyzes scenarios through threat multiplication, slow-onset crises, water-food-energy nexus, climate migration, and adaptation-mitigation frameworks
-    tags: [analysis, climate-security, threat-multiplier, nexus, migration]
+    tags: [specialist, analysis, climate-security, threat-multiplier, nexus, migration]
 
 input_fields:
   - name: text

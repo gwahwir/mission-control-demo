@@ -21,7 +21,7 @@ skills:
   - id: yergin-energy-analysis
     name: Energy Geopolitics Analysis
     description: Analyzes scenarios through energy security, resource competition, and energy transition frameworks
-    tags: [analysis, energy, geopolitics, resources]
+    tags: [specialist, analysis, energy, geopolitics, resources]
 
 input_fields:
   - name: text

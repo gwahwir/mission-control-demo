@@ -21,7 +21,7 @@ skills:
   - id: counterfactual-analysis
     name: Counterfactual Analysis
     description: Generates alternative scenarios and explores causal pathways through counterfactual reasoning
-    tags: [analysis, counterfactual, scenarios, causality]
+    tags: [specialist, analysis, counterfactual, scenarios, causality]
 
 input_fields:
   - name: text

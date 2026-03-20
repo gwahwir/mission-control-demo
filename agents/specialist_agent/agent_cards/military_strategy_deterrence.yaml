@@ -21,7 +21,7 @@ skills:
   - id: military-strategy-analysis
     name: Military Strategy & Deterrence Analysis
     description: Analyzes military balance, deterrence credibility, and escalation dynamics
-    tags: [analysis, military, deterrence, strategy]
+    tags: [specialist, analysis, military, deterrence, strategy]
 
 input_fields:
   - name: text

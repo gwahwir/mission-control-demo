@@ -21,7 +21,7 @@ skills:
   - id: economic-statecraft-analysis
     name: Economic Statecraft Analysis
     description: Analyzes scenarios through weaponized interdependence, sanctions effectiveness, development finance, and economic coercion frameworks
-    tags: [analysis, economic-statecraft, sanctions, interdependence, geopolitics]
+    tags: [specialist, analysis, economic-statecraft, sanctions, interdependence, geopolitics]
 
 input_fields:
   - name: text

@@ -21,7 +21,7 @@ skills:
   - id: technology-threats-analysis
     name: Technology & Emerging Threats Analysis
     description: Analyzes cyber warfare, AI risks, space security, and information warfare threats
-    tags: [analysis, technology, cyber, ai, threats]
+    tags: [specialist, analysis, technology, cyber, ai, threats]
 
 input_fields:
   - name: text

@@ -1,15 +1,12 @@
-name: Lead Analyst Agent A
+name: Lead Analyst Agent A Within Docker
 description: >
-  Orchestrator agent that fans out work to downstream sub-agents
+  Orchestrator agent that fans out work to dynamically discovered specialist agents
   via A2A, collects their results, and returns a synthesized analysis.
+  Specialists are selected autonomously based on relevance to the input.
 
-sub_agents:
-  - label: ASEAN Security Analyst
-    url: http://localhost:8006/asean-security
-  - label: Realist IR Analyst
-    url: http://localhost:8006/realist-ir
-  - label: Taleb Antifragile Analyst
-    url: http://localhost:8006/taleb-antifragile
+dynamic_discovery: true
+control_plane_url: http://control-plane:8000
+min_specialists: 3
 
 input_fields:
   - name: text

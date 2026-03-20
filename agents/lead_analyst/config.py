@@ -56,6 +56,9 @@ class LeadAnalystConfig:
     max_completion_tokens: int = 4096
     skills: list[dict[str, Any]] = field(default_factory=list)
     input_fields: list[dict[str, Any]] = field(default_factory=list)
+    dynamic_discovery: bool = False
+    control_plane_url: str | None = None
+    min_specialists: int = 3
 
 
 def load_lead_analyst_configs(directory: Path) -> list[LeadAnalystConfig]:
@@ -83,9 +86,13 @@ def load_lead_analyst_configs(directory: Path) -> list[LeadAnalystConfig]:
         if not name:
             raise ValueError(f"{path.name}: missing required field 'name'")
 
+        dynamic_discovery = bool(data.get("dynamic_discovery", False))
         raw_sub_agents = data.get("sub_agents", [])
-        if not raw_sub_agents:
-            raise ValueError(f"{path.name}: must define at least one sub_agent")
+        if not raw_sub_agents and not dynamic_discovery:
+            raise ValueError(
+                f"{path.name}: must define at least one sub_agent "
+                "(or set dynamic_discovery: true)"
+            )
 
         # Parse sub-agents
         sub_agents: list[SubAgentConfig] = []
@@ -148,6 +155,9 @@ def load_lead_analyst_configs(directory: Path) -> list[LeadAnalystConfig]:
                 max_completion_tokens=data.get("max_completion_tokens", 4096),
                 skills=data.get("skills", []),
                 input_fields=data.get("input_fields", []),
+                dynamic_discovery=dynamic_discovery,
+                control_plane_url=data.get("control_plane_url"),
+                min_specialists=data.get("min_specialists", 3),
             )
         )
         print(f"[lead-analyst] Loaded config: {type_id} ({name}) from {path.name}")

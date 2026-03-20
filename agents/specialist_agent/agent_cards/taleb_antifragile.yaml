@@ -21,7 +21,7 @@ skills:
   - id: taleb-antifragile-analysis
     name: Antifragile Analysis
     description: Analyzes scenarios for fragility and tail risks using Taleb's framework
-    tags: [analysis, antifragile, risk, taleb]
+    tags: [specialist, analysis, antifragile, risk, taleb]
 
 input_fields:
   - name: text

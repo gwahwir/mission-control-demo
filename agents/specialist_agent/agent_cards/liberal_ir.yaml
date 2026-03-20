@@ -21,7 +21,7 @@ skills:
   - id: liberal-ir-analysis
     name: Liberal IR Analysis
     description: Analyzes scenarios through liberal institutionalism, democratic peace, and interdependence frameworks
-    tags: [analysis, liberalism, institutions, cooperation]
+    tags: [specialist, analysis, liberalism, institutions, cooperation]
 
 input_fields:
   - name: text

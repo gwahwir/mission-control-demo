@@ -21,7 +21,7 @@ skills:
   - id: asean-security-analysis
     name: ASEAN Security Analysis
     description: Analyzes Southeast Asian regional dynamics, ASEAN centrality, and maritime security
-    tags: [analysis, asean, southeast-asia, maritime]
+    tags: [specialist, analysis, asean, southeast-asia, maritime]
 
 input_fields:
   - name: text
