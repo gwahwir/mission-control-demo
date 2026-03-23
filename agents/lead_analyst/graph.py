@@ -149,6 +149,10 @@ class LeadAnalystState(TypedDict):
     # Per-branch state injected via Send API
     _spec_label: str
     _spec_url: str
+    # Sequential analysis fields
+    peripheral_findings: str  # Output from peripheral_scan specialist
+    aggregated_consensus: str  # Initial aggregation (domain + peripheral, before ACH)
+    ach_analysis: str  # Output from ach_red_team specialist
 
 
 # ---------------------------------------------------------------------------
@@ -236,13 +240,32 @@ async def _fetch_agents(control_plane_url: str) -> list[dict]:
 
 
 def _filter_online_specialists(agents: list[dict]) -> list[dict]:
-    """Return candidates: online agents with 'specialist' in any skill tag."""
+    """Return candidates: online domain specialists only (excludes meta-specialists).
+
+    Meta-specialists (peripheral_scan, ach_red_team) are tagged with specialist_L2 or specialist_L3
+    and are called sequentially in the graph, not selected by LLM.
+    """
+    META_SPECIALIST_TAGS = {"specialist_L2", "specialist_L3"}
     result = []
     for agent in agents:
         if agent.get("status") != "online":
             continue
-        if not any("specialist" in skill.get("tags", []) for skill in agent.get("skills", [])):
+
+        # Check if agent has specialist skill AND is not a meta-specialist
+        has_specialist = False
+        is_meta_specialist = False
+
+        for skill in agent.get("skills", []):
+            tags = set(skill.get("tags", []))
+            if "specialist" in tags:
+                has_specialist = True
+            if tags & META_SPECIALIST_TAGS:  # Intersection with meta tags
+                is_meta_specialist = True
+                break
+
+        if not has_specialist or is_meta_specialist:
             continue
+
         online_instances = [
             i for i in agent.get("instances", []) if i.get("status") == "online"
         ]
@@ -499,6 +522,224 @@ def route_to_specialists(state: LeadAnalystState) -> list:
     ]
 
 
+def check_all_specialists_done(state: LeadAnalystState) -> str:
+    """Route to peripheral_scan only after all domain specialists complete.
+
+    This router is used as a conditional edge from call_specialist node.
+    It checks if the number of results matches the number of selected specialists.
+    If all specialists are done, route to peripheral_scan. Otherwise, stay in call_specialist
+    (which will be called again for remaining specialists via Send API).
+    """
+    num_selected = len(state.get("selected_specialists", []))
+    num_results = len(state.get("results", []))
+
+    if num_results >= num_selected:
+        return "call_peripheral_scan"
+    else:
+        return "call_specialist"
+
+
+async def call_peripheral_scan(
+    state: LeadAnalystState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Call peripheral scanner after domain specialists complete.
+
+    Peripheral scan identifies what domain specialists missed: weak signals,
+    blind spots, uncited intelligence, and cross-domain connections.
+    """
+    executor = config["configurable"]["executor"]
+    task_id = config["configurable"]["task_id"]
+    executor.check_cancelled(task_id)
+
+    context_id = config["configurable"].get("context_id")
+
+    # Build input: raw document + key questions + domain specialist summaries
+    domain_results = state.get("results", [])
+    specialist_summaries = "\n\n".join([
+        f"**{label}**: {text[:200]}..."
+        for label, text in domain_results
+        if not text.startswith("[Error")
+    ])
+
+    peripheral_input = f"""
+{state["input"]}
+
+---
+## KEY QUESTIONS (from user):
+{state.get("key_questions", "None provided")}
+
+---
+## DOMAIN SPECIALIST ANALYSES (for reference - identify what they missed):
+
+{specialist_summaries}
+
+---
+## YOUR TASK:
+Apply peripheral scan methodology to identify what domain specialists missed:
+1. Uncited intelligence that NO domain specialist referenced (especially relevant to key questions)
+2. Weak signals and anomalies (prioritize those addressing key questions)
+3. Cross-domain connections
+4. Framework blind spots preventing key questions from being fully addressed
+5. Any other significant gaps (even if not directly related to key questions)
+"""
+
+    # TODO: Make specialist agent URL configurable via env var or discovery
+    specialist_agent_url = os.getenv("SPECIALIST_AGENT_URL", "http://specialist-agent:8006")
+    peripheral_scan_url = f"{specialist_agent_url}/execute"
+
+    try:
+        peripheral_output = await _call_sub_agent(
+            peripheral_scan_url,
+            peripheral_input,
+            context_id=context_id,
+        )
+    except Exception as exc:
+        peripheral_output = f"[Error calling peripheral_scan: {exc}]"
+        logger.warning("Peripheral scan failed in task %s: %s", task_id, exc)
+
+    return {"peripheral_findings": peripheral_output}
+
+
+async def call_ach_red_team(
+    state: LeadAnalystState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Call ACH red team to challenge aggregated consensus.
+
+    ACH (Analysis of Competing Hypotheses) generates alternative hypotheses
+    and identifies disconfirming evidence for the consensus assessment.
+    """
+    executor = config["configurable"]["executor"]
+    task_id = config["configurable"]["task_id"]
+    executor.check_cancelled(task_id)
+
+    context_id = config["configurable"].get("context_id")
+
+    ach_input = f"""
+## AGGREGATED CONSENSUS TO CHALLENGE:
+
+{state["aggregated_consensus"]}
+
+---
+## KEY QUESTIONS (from user):
+{state.get("key_questions", "None provided")}
+
+---
+## PERIPHERAL SCAN FINDINGS (weak signals that may support alternatives):
+
+{state.get("peripheral_findings", "None identified")}
+
+---
+## YOUR TASK:
+
+Apply ACH (Analysis of Competing Hypotheses) methodology to challenge the consensus above:
+
+1. **Identify the Consensus Hypothesis (H1)** regarding the key questions above
+2. **Generate 3-4 Alternative Hypotheses (H2, H3, H4)** that answer the key questions differently
+3. **Identify Disconfirming Evidence**: What evidence contradicts H1?
+4. **Evaluate Peripheral Signals**: Do weak signals support any alternative hypotheses?
+5. **Challenge the Questions Themselves**: Are the key questions framing the problem correctly, or should decision-makers be asking different questions?
+6. **Pre-Mortem Analysis**: If consensus is wrong, what did we miss?
+
+Be adversarial. Your job is to find flaws in both the consensus AND the framing of the questions.
+"""
+
+    # TODO: Make specialist agent URL configurable
+    specialist_agent_url = os.getenv("SPECIALIST_AGENT_URL", "http://specialist-agent:8006")
+    ach_red_team_url = f"{specialist_agent_url}/execute"
+
+    try:
+        ach_output = await _call_sub_agent(
+            ach_red_team_url,
+            ach_input,
+            context_id=context_id,
+        )
+    except Exception as exc:
+        ach_output = f"[Error calling ach_red_team: {exc}]"
+        logger.warning("ACH red team failed in task %s: %s", task_id, exc)
+
+    return {"ach_analysis": ach_output}
+
+
+async def final_synthesis(
+    state: LeadAnalystState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Integrate ACH red team challenges into final output.
+
+    Produces a balanced assessment that presents both the consensus view
+    and credible alternative hypotheses identified by ACH red team.
+    """
+    executor = config["configurable"]["executor"]
+    task_id = config["configurable"]["task_id"]
+    executor.check_cancelled(task_id)
+
+    # If no OpenAI key, just concatenate consensus + ACH
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        combined = f"""
+{state["aggregated_consensus"]}
+
+---
+## ACH RED TEAM CHALLENGE:
+
+{state["ach_analysis"]}
+"""
+        return {"output": combined}
+
+    # Use LLM to integrate ACH challenges into balanced assessment
+    synthesis_prompt = f"""
+You are producing a final intelligence assessment that integrates red team challenges.
+
+## CONSENSUS ANALYSIS:
+{state["aggregated_consensus"]}
+
+## ACH RED TEAM CHALLENGE:
+{state["ach_analysis"]}
+
+## YOUR TASK:
+Produce a final assessment that:
+1. **Preserves the consensus view** where well-supported
+2. **Integrates ACH alternative hypotheses** as "monitoring-worthy" where plausible
+3. **Flags disconfirming evidence** that warrants caution
+4. **Provides decision-makers** with both the consensus AND credible alternatives
+
+**Tone:** Balanced, acknowledges uncertainty, action-oriented.
+
+**Structure:**
+- Executive Summary (2-3 sentences)
+- Primary Assessment (consensus view)
+- Alternative Hypotheses Worth Monitoring (from ACH)
+- Key Uncertainties & Disconfirming Evidence
+- Recommended Actions
+
+Respond in JSON format matching the standard aggregation output structure.
+"""
+
+    from openai import AsyncOpenAI
+    openai_kwargs: dict[str, Any] = {"api_key": api_key}
+    base_url = os.getenv("OPENAI_BASE_URL")
+    if base_url:
+        openai_kwargs["base_url"] = base_url
+    client = AsyncOpenAI(**openai_kwargs)
+
+    effective_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    try:
+        resp = await client.chat.completions.create(
+            model=effective_model,
+            messages=[
+                {"role": "system", "content": AGGREGATOR_SYSTEM_PROMPT},
+                {"role": "user", "content": synthesis_prompt},
+            ],
+            temperature=0.3,
+            max_completion_tokens=4096,
+        )
+        return {"output": resp.choices[0].message.content or ""}
+    except Exception as exc:
+        logger.error("Final synthesis LLM failed task_id=%s: %s", task_id, exc)
+        # Fallback: concatenate
+        combined = f"{state['aggregated_consensus']}\n\n---\n\n## ACH CHALLENGES:\n{state['ach_analysis']}"
+        return {"output": combined}
+
+
 # ---------------------------------------------------------------------------
 # Fixed nodes
 # ---------------------------------------------------------------------------
@@ -515,6 +756,7 @@ def _build_aggregation_prompt(
     baselines: str,
     results: list[tuple[str, str]],
     selection_reasoning: dict[str, str] | None = None,
+    peripheral_findings: str = "",
 ) -> str:
     """Build the user prompt for the aggregation LLM call."""
     parts = [
@@ -582,6 +824,25 @@ def _build_aggregation_prompt(
 
         parts.extend(["", "---", ""])
 
+    # Add peripheral findings section if available
+    if peripheral_findings and not peripheral_findings.startswith("[Error"):
+        parts.extend([
+            "",
+            "## PERIPHERAL SCAN FINDINGS:",
+            "",
+            "The Peripheral Scanner identified the following signals, blind spots, and uncited intelligence:",
+            "",
+            peripheral_findings,
+            "",
+            "**Integration Task:** Incorporate peripheral findings into your synthesis, especially signals that:",
+            "- Were missed by all domain frameworks (collective blind spot)",
+            "- Provide cross-domain connections",
+            "- Represent weak early warnings",
+            "",
+            "---",
+            "",
+        ])
+
     parts.extend(["## Your Task:", "", AGGREGATION_OUTPUT_FORMAT])
     return "\n".join(parts)
 
@@ -609,18 +870,19 @@ def _make_aggregate_node(
 
         results = [(label, text) for label, text in all_results if not text.startswith("[Error")]
         if not results:
-            return {"output": "No sub-agent results available."}
+            return {"aggregated_consensus": "No sub-agent results available."}
 
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             sections = [f"=== {label} ===\n{text}" for label, text in results]
-            return {"output": "\n\n".join(sections)}
+            return {"aggregated_consensus": "\n\n".join(sections)}
 
         user_prompt = _build_aggregation_prompt(
             state["input"],
             state.get("baselines", ""),
             results,
-            state.get("selection_reasoning")
+            state.get("selection_reasoning"),
+            peripheral_findings=state.get("peripheral_findings", "")
         )
 
         from openai import AsyncOpenAI
@@ -642,7 +904,7 @@ def _make_aggregate_node(
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
             )
-            return {"output": resp.choices[0].message.content or ""}
+            return {"aggregated_consensus": resp.choices[0].message.content or ""}
         except openai.APIError as e:
             logger.error(
                 "Lead analyst aggregation LLM failed task_id=%s, falling back to concat: %s",
@@ -650,7 +912,7 @@ def _make_aggregate_node(
                 e,
             )
             aggregated = "\n\n---\n\n".join(text for _, text in results)
-            return {"output": aggregated}
+            return {"aggregated_consensus": aggregated}
 
     return aggregate
 
@@ -696,11 +958,35 @@ def build_lead_analyst_graph(
                 "dynamic_discovery=True requires control_plane_url in YAML "
                 "or CONTROL_PLANE_URL environment variable"
             )
+        # Add nodes for sequential flow
         graph.add_node("discover_and_select", _make_discover_node(effective_cp_url, min_specialists))
         graph.add_node("call_specialist", call_specialist)
+        graph.add_node("call_peripheral_scan", call_peripheral_scan)
+        graph.add_node("call_ach_red_team", call_ach_red_team)
+        graph.add_node("final_synthesis", final_synthesis)
+
+        # Sequential flow:
+        # 1. receive → discover_and_select
         graph.add_edge("receive", "discover_and_select")
+
+        # 2. discover_and_select → call_specialist (parallel fan-out via route_to_specialists)
         graph.add_conditional_edges("discover_and_select", route_to_specialists, ["call_specialist"])
-        graph.add_edge("call_specialist", "aggregate")
+
+        # 3. call_specialist → (wait for all) → call_peripheral_scan
+        graph.add_conditional_edges(
+            "call_specialist",
+            check_all_specialists_done,
+            {
+                "call_specialist": "call_specialist",  # Loop back if not done
+                "call_peripheral_scan": "call_peripheral_scan",  # All done, proceed
+            }
+        )
+
+        # 4. Sequential: peripheral_scan → aggregate → ach_red_team → final_synthesis → respond
+        graph.add_edge("call_peripheral_scan", "aggregate")
+        graph.add_edge("aggregate", "call_ach_red_team")
+        graph.add_edge("call_ach_red_team", "final_synthesis")
+        graph.add_edge("final_synthesis", "respond")
     else:
         for sa in sub_agents:
             graph.add_node(sa.node_id, _make_sub_agent_node(sa))
