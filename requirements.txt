@@ -19,3 +19,4 @@ pytest-asyncio>=1.0.0
 pytest-httpx>=0.36.0
 langfuse==4.0.0
 langchain==1.2.13
+mem0ai>=0.1.29
