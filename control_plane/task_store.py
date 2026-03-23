@@ -40,6 +40,8 @@ class TaskRecord:
     instance_url: str = ""          # exact agent instance that is running this task
     state: TaskState = TaskState.SUBMITTED
     input_text: str = ""
+    baselines: str = ""             # optional: current baseline assessments
+    key_questions: str = ""         # optional: specific questions to address
     output_text: str = ""
     error: str = ""                 # error message when state is failed
     created_at: float = field(default_factory=time.time)
@@ -53,6 +55,8 @@ class TaskRecord:
             "instance_url": self.instance_url,
             "state": self.state.value,
             "input_text": self.input_text,
+            "baselines": self.baselines,
+            "key_questions": self.key_questions,
             "output_text": self.output_text,
             "error": self.error,
             "created_at": self.created_at,
@@ -70,6 +74,8 @@ class TaskRecord:
             instance_url=row.get("instance_url", ""),
             state=TaskState(row["state"]),
             input_text=row.get("input_text", ""),
+            baselines=row.get("baselines", ""),
+            key_questions=row.get("key_questions", ""),
             output_text=row.get("output_text", ""),
             error=row.get("error", ""),
             created_at=float(row["created_at"]),
@@ -127,6 +133,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     instance_url TEXT   NOT NULL DEFAULT '',
     state        TEXT   NOT NULL,
     input_text   TEXT   NOT NULL DEFAULT '',
+    baselines    TEXT   NOT NULL DEFAULT '',
+    key_questions TEXT  NOT NULL DEFAULT '',
     output_text  TEXT   NOT NULL DEFAULT '',
     error        TEXT   NOT NULL DEFAULT '',
     created_at   FLOAT8 NOT NULL,
@@ -139,11 +147,16 @@ _ADD_ERROR_COLUMN = """
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT '';
 """
 
+_ADD_STRUCTURED_INPUT_COLUMNS = """
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS baselines TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS key_questions TEXT NOT NULL DEFAULT '';
+"""
+
 _UPSERT = """
 INSERT INTO tasks
-    (task_id, agent_id, instance_url, state, input_text, output_text, error, created_at, updated_at, a2a_task)
+    (task_id, agent_id, instance_url, state, input_text, baselines, key_questions, output_text, error, created_at, updated_at, a2a_task)
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (task_id) DO UPDATE SET
     state        = EXCLUDED.state,
     output_text  = EXCLUDED.output_text,
@@ -169,6 +182,7 @@ class PostgresTaskStore:
         async with self._pool.acquire() as conn:
             await conn.execute(_CREATE_TABLE)
             await conn.execute(_ADD_ERROR_COLUMN)
+            await conn.execute(_ADD_STRUCTURED_INPUT_COLUMNS)
 
     async def close(self) -> None:
         if self._pool:
@@ -184,6 +198,8 @@ class PostgresTaskStore:
                 record.instance_url,
                 record.state.value,
                 record.input_text,
+                record.baselines,
+                record.key_questions,
                 record.output_text,
                 record.error,
                 record.created_at,

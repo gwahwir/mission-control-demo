@@ -52,6 +52,8 @@ def init_routes(
 
 class TaskRequest(BaseModel):
     text: str
+    baselines: str = ""  # Optional: current baseline assessments
+    key_questions: str = ""  # Optional: specific questions to address
 
 
 class RegisterRequest(BaseModel):
@@ -130,6 +132,8 @@ async def dispatch_task(agent_id: str, req: TaskRequest) -> dict[str, Any]:
         instance_url=instance.url,
         state=TaskState.SUBMITTED,
         input_text=req.text,
+        baselines=req.baselines,
+        key_questions=req.key_questions,
     )
     await _task_store.save(record)
 
@@ -159,7 +163,11 @@ async def _run_task(
     started_at = time.time()
     client = A2AClient(instance.url, timeout=300)
     try:
-        result = await client.send_message(text)
+        result = await client.send_message(
+            text,
+            baselines=record.baselines,
+            key_questions=record.key_questions,
+        )
 
         status = result.get("status", {})
         state_str = status.get("state", "failed")

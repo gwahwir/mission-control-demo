@@ -13,7 +13,19 @@ sub_agents:
 
 input_fields:
   - name: text
-    label: Analysis Request
+    label: Scenario / Question
     type: textarea
     required: true
-    placeholder: Enter the text or request for the lead analyst...
+    placeholder: "Describe the situation or question to analyze..."
+
+  - name: baselines
+    label: Current Baseline Assessments
+    type: textarea
+    required: false
+    placeholder: "Enter current baseline assessments or prior conclusions (used for change detection)..."
+
+  - name: key_questions
+    label: Key Questions
+    type: textarea
+    required: false
+    placeholder: "Enter specific analytical questions to address (sent to specialists)..."

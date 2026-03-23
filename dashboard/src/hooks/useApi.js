@@ -6,11 +6,16 @@ export async function fetchAgents() {
   return res.json();
 }
 
-export async function dispatchTask(agentId, text) {
+export async function dispatchTask(agentId, payload) {
+  // payload is either a string (backward compat) or an object {text, baselines, key_questions}
+  const body = typeof payload === 'string'
+    ? JSON.stringify({ text: payload })
+    : JSON.stringify(payload);
+
   const res = await fetch(`${API_BASE}/agents/${agentId}/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body,
   });
   if (!res.ok) throw new Error("Failed to dispatch task");
   return res.json();

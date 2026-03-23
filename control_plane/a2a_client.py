@@ -32,8 +32,18 @@ class A2AClient:
         task_id: str | None = None,
         context_id: str | None = None,
         parent_span_id: str | None = None,
+        baselines: str = "",
+        key_questions: str = "",
     ) -> dict[str, Any]:
         """Send a message/send JSON-RPC request and return the result."""
+        metadata: dict[str, Any] = {}
+        if parent_span_id:
+            metadata["parentSpanId"] = parent_span_id
+        if baselines:
+            metadata["baselines"] = baselines
+        if key_questions:
+            metadata["keyQuestions"] = key_questions
+
         message: dict[str, Any] = {
             "kind": "message",
             "role": "user",
@@ -42,8 +52,8 @@ class A2AClient:
         }
         if context_id:
             message["contextId"] = context_id
-        if parent_span_id:
-            message["metadata"] = {"parentSpanId": parent_span_id}
+        if metadata:
+            message["metadata"] = metadata
 
         params: dict[str, Any] = {"message": message}
         if task_id:

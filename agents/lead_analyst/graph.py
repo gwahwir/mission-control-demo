@@ -66,6 +66,12 @@ You receive analyses from specialist agents, each viewing a scenario through a d
 - Do not produce generic statements like "The situation is complex."
 - Be specific: What exactly is at stake? What are the concrete risks and opportunities?
 
+### 5. Baseline Evaluation (when provided)
+- If baseline assessments are provided, your primary task is to evaluate **changes**.
+- Identify where specialist analyses **confirm**, **challenge**, or **update** the baselines.
+- Be explicit about what has changed, what remains stable, and what is now uncertain.
+- Do not simply restate baselines—focus on **delta analysis** (what's new or different).
+
 ## Analytical Protocol
 
 ### 1. Convergent Analysis
@@ -130,6 +136,8 @@ Apply your meta-analytical framework rigorously. Be specific, actionable, and in
 
 class LeadAnalystState(TypedDict):
     input: str
+    baselines: str  # Current baseline assessments (used for specialist selection and aggregation)
+    key_questions: str  # Specific analytical questions (sent to specialists)
     # Each sub-agent node appends a (label, text) tuple here.
     # operator.add merges lists from parallel branches.
     results: Annotated[list[tuple[str, str]], operator.add]
@@ -181,6 +189,11 @@ def _make_sub_agent_node(sa: SubAgentConfig):
 
         context_id = config["configurable"].get("context_id")
 
+        # Build sub-agent input: original input + key questions (NOT baselines)
+        sub_agent_input = state["input"]
+        if state.get("key_questions"):
+            sub_agent_input += f"\n\n## Key Questions to Address:\n{state['key_questions']}"
+
         lf_span = None
         parent_span_id: str | None = None
         if os.getenv("LANGFUSE_PUBLIC_KEY"):
@@ -194,7 +207,7 @@ def _make_sub_agent_node(sa: SubAgentConfig):
             parent_span_id = lf_span.id
 
         try:
-            text = await _call_sub_agent(sa.url, state["input"], context_id=context_id, parent_span_id=parent_span_id)
+            text = await _call_sub_agent(sa.url, sub_agent_input, context_id=context_id, parent_span_id=parent_span_id)
         except Exception as exc:
             text = f"[Error calling {sa.label}: {exc}]"
         finally:
@@ -289,6 +302,7 @@ def _validate_llm_selection(
 
 async def _select_specialists_with_llm(
     input_text: str,
+    baselines: str,
     candidates: list[dict],
     min_specialists: int,
     model: str | None = None,
@@ -321,6 +335,17 @@ async def _select_specialists_with_llm(
     system_prompt = (
         f"You are selecting analytical specialists for the following intelligence task:\n\n"
         f"{input_text}\n\n"
+    )
+
+    # Include baselines if provided to inform specialist selection
+    if baselines:
+        system_prompt += (
+            f"## Current Baseline Assessments:\n"
+            f"{baselines}\n\n"
+            f"Select specialists who can best evaluate changes, challenges, or updates to these baselines.\n\n"
+        )
+
+    system_prompt += (
         f"Available specialists:\n{candidate_lines}\n\n"
         f"Select at least {min_specialists} specialists most relevant and complementary for "
         f"this task. For each selected specialist, provide a concise reason (1-2 sentences) "
@@ -399,7 +424,10 @@ def _make_discover_node(control_plane_url: str, min_specialists: int):
 
         try:
             selected = await _select_specialists_with_llm(
-                state["input"], candidates, min_specialists
+                state["input"],
+                state.get("baselines", ""),
+                candidates,
+                min_specialists
             )
             if len(selected) < min_specialists:
                 raise ValueError(f"LLM returned {len(selected)} < {min_specialists} specialists")
@@ -434,6 +462,11 @@ async def call_specialist(
     url = state["_spec_url"]
     context_id = config["configurable"].get("context_id")
 
+    # Build specialist input: original input + key questions (NOT baselines)
+    specialist_input = state["input"]
+    if state.get("key_questions"):
+        specialist_input += f"\n\n## Key Questions to Address:\n{state['key_questions']}"
+
     lf_span = None
     parent_span_id: str | None = None
     if os.getenv("LANGFUSE_PUBLIC_KEY"):
@@ -447,7 +480,7 @@ async def call_specialist(
         parent_span_id = lf_span.id
 
     try:
-        text = await _call_sub_agent(url, state["input"], context_id=context_id, parent_span_id=parent_span_id)
+        text = await _call_sub_agent(url, specialist_input, context_id=context_id, parent_span_id=parent_span_id)
     except Exception as exc:
         text = f"[Error calling {label}: {exc}]"
     finally:
@@ -479,6 +512,7 @@ def receive(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
 
 def _build_aggregation_prompt(
     input_text: str,
+    baselines: str,
     results: list[tuple[str, str]],
     selection_reasoning: dict[str, str] | None = None,
 ) -> str:
@@ -490,6 +524,19 @@ def _build_aggregation_prompt(
         input_text,
         "",
     ]
+
+    # Include baselines section for change detection
+    if baselines:
+        parts.extend([
+            "## Current Baseline Assessments:",
+            "",
+            baselines,
+            "",
+            "**Your task:** Evaluate how the specialist analyses below challenge, update, or confirm these baselines.",
+            "",
+            "---",
+            "",
+        ])
 
     if selection_reasoning:
         active_reasoning = {k: v for k, v in selection_reasoning.items() if v}
@@ -569,7 +616,12 @@ def _make_aggregate_node(
             sections = [f"=== {label} ===\n{text}" for label, text in results]
             return {"output": "\n\n".join(sections)}
 
-        user_prompt = _build_aggregation_prompt(state["input"], results, state.get("selection_reasoning"))
+        user_prompt = _build_aggregation_prompt(
+            state["input"],
+            state.get("baselines", ""),
+            results,
+            state.get("selection_reasoning")
+        )
 
         from openai import AsyncOpenAI
 

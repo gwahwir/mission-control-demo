@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from a2a.server.agent_execution import RequestContext
 from langgraph.graph.state import CompiledStateGraph
 
 from agents.base import LangGraphA2AExecutor
@@ -19,6 +22,23 @@ class LeadAnalystExecutor(LangGraphA2AExecutor):
     @property
     def sub_agents(self) -> list[SubAgentConfig]:
         return self._config.sub_agents
+
+    def prepare_input(self, context: RequestContext) -> dict[str, Any]:
+        """Extract structured input from A2A message metadata."""
+        user_text = context.get_user_input() or ""
+
+        # Extract from metadata if available
+        baselines = ""
+        key_questions = ""
+        if context.message and context.message.metadata:
+            baselines = context.message.metadata.get("baselines", "")
+            key_questions = context.message.metadata.get("keyQuestions", "")
+
+        return {
+            "input": user_text,
+            "baselines": baselines,
+            "key_questions": key_questions,
+        }
 
     def build_graph(self) -> CompiledStateGraph:
         return build_lead_analyst_graph(
