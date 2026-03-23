@@ -551,8 +551,6 @@ async def call_peripheral_scan(
     task_id = config["configurable"]["task_id"]
     executor.check_cancelled(task_id)
 
-    context_id = config["configurable"].get("context_id")
-
     # Build input: raw document + key questions + domain specialist summaries
     domain_results = state.get("results", [])
     specialist_summaries = "\n\n".join([

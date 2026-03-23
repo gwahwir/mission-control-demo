@@ -19,7 +19,6 @@ from typing import Any
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import (
-    Artifact,
     Message,
     Part,
     TaskState,

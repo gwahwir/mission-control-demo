@@ -8,17 +8,14 @@ wait_for_task() to poll until a terminal state is reached.
 from __future__ import annotations
 
 import asyncio
-import json
 
 import httpx
-import pytest
 from pytest_httpx import HTTPXMock
 
 from tests.conftest import (
     FAKE_AGENT_ID,
     FAKE_AGENT_URL,
     a2a_cancel_response,
-    a2a_rpc,
     a2a_rpc_callback,
     wait_for_task,
 )
@@ -103,7 +100,7 @@ async def test_active_tasks_decrements_after_completion(client, registry, httpx_
 
 async def test_least_connections_dispatch(registry, task_store, broker, httpx_mock: HTTPXMock):
     """Two instances: the one with fewer active tasks should be picked."""
-    from control_plane.registry import AgentInstance, AgentStatus, AgentType
+    from control_plane.registry import AgentInstance, AgentStatus
 
     inst_a = AgentInstance(url="http://echo-a:8001", status=AgentStatus.ONLINE, active_tasks=3)
     inst_b = AgentInstance(url="http://echo-b:8001", status=AgentStatus.ONLINE, active_tasks=0)

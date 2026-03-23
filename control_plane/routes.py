@@ -22,7 +22,7 @@ from control_plane.metrics import (
     tasks_failed,
 )
 from control_plane.pubsub import InMemoryBroker, RedisBroker
-from control_plane.registry import AgentInstance, AgentRegistry, AgentStatus
+from control_plane.registry import AgentInstance, AgentRegistry
 from control_plane.task_store import PostgresTaskStore, TaskRecord, TaskState, TaskStore
 
 logger = get_logger(__name__)

@@ -1,6 +1,5 @@
 """Tests for specialist_agent config loading, including system_prompt_file and output_format."""
 
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -30,7 +29,7 @@ def test_load_inline_system_prompt(tmp_configs, monkeypatch):
         "system_prompt": "You are a test agent.",
     })
 
-    from agents.specialist_agent.config import load_specialist_configs, PROMPTS_DIR
+    from agents.specialist_agent.config import load_specialist_configs
     monkeypatch.setattr("agents.specialist_agent.config.PROMPTS_DIR", prompts)
 
     configs = load_specialist_configs(cards)

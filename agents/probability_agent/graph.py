@@ -237,7 +237,7 @@ def _parse_json_safe(text: str, task_id: str = "") -> Any:
     candidates = [text]
     if text.startswith("```"):
         lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
+        lines = [ln for ln in lines if not ln.strip().startswith("```")]
         candidates.append("\n".join(lines).strip())
 
     for attempt in candidates:
