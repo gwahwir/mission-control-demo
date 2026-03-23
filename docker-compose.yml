@@ -3,7 +3,7 @@ version: "3.9"
 services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg16-trixie
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: missioncontrol
       POSTGRES_USER: mc
