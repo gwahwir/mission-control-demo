@@ -193,10 +193,11 @@ def _make_sub_agent_node(sa: SubAgentConfig):
 
         context_id = config["configurable"].get("context_id")
 
-        # Build sub-agent input: original input + key questions (NOT baselines)
-        sub_agent_input = state["input"]
-        if state.get("key_questions"):
-            sub_agent_input += f"\n\n## Key Questions to Address:\n{state['key_questions']}"
+        # Build sub-agent input as JSON so specialist agents receive key_questions as a named field
+        sub_agent_input = json.dumps({
+            "text": state["input"],
+            "key_questions": state.get("key_questions", ""),
+        })
 
         lf_span = None
         parent_span_id: str | None = None
@@ -485,10 +486,11 @@ async def call_specialist(
     url = state["_spec_url"]
     context_id = config["configurable"].get("context_id")
 
-    # Build specialist input: original input + key questions (NOT baselines)
-    specialist_input = state["input"]
-    if state.get("key_questions"):
-        specialist_input += f"\n\n## Key Questions to Address:\n{state['key_questions']}"
+    # Build specialist input as JSON so specialist agents receive key_questions as a named field
+    specialist_input = json.dumps({
+        "text": state["input"],
+        "key_questions": state.get("key_questions", ""),
+    })
 
     lf_span = None
     parent_span_id: str | None = None

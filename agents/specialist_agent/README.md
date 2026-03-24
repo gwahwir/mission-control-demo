@@ -48,6 +48,8 @@ input_fields:                       # optional, rendered in the dashboard
     type: textarea
     required: true
     placeholder: Paste code to review...
+  # Note: a key_questions field is automatically appended to all specialists
+  # by the server at startup — no need to define it in YAML.
 
 # LLM settings — provide system_prompt OR system_prompt_file, not both
 system_prompt: |                    # inline prompt (for short prompts)
@@ -99,13 +101,25 @@ python -m agents.specialist_agent.server
 docker compose up specialist
 ```
 
+## Input Format
+
+Specialists accept either plain text or a JSON object:
+
+```json
+{ "text": "document to analyse...", "key_questions": "What are the key risks?" }
+```
+
+If the input is valid JSON with a `text` field, `key_questions` is extracted and appended to the user message before the LLM call. Plain text input is also accepted for backward compatibility (no JSON parsing required).
+
+When called via Lead Analyst, the JSON format is always used so `key_questions` is passed as a named field rather than embedded in the text body.
+
 ## Graph
 
 ```
 [process] → [respond]
 ```
 
-- **process**: Calls the LLM with the specialist's system prompt and user input
+- **process**: Parses input (JSON or plain text), appends `key_questions` if present, calls the LLM with the specialist's system prompt
 - **respond**: Copies the LLM response to output
 
 Both nodes support cancellation via `check_cancelled(task_id)`.

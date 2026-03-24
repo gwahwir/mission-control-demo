@@ -6,6 +6,7 @@ temperature, and max_completion_tokens captured via closures.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, TypedDict
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class SpecialistState(TypedDict):
     input: str
+    key_questions: str
     response: str
     output: str
 
@@ -53,9 +55,20 @@ def build_specialist_graph(
             openai_kwargs["api_key"] = api_key
         client = AsyncOpenAI(**openai_kwargs)
 
-        user_content = state["input"]
+        raw_input = state["input"]
+        try:
+            data = json.loads(raw_input)
+            text = data.get("text", raw_input)
+            key_questions = data.get("key_questions", "") or state.get("key_questions", "")
+        except (json.JSONDecodeError, ValueError):
+            text = raw_input
+            key_questions = state.get("key_questions", "")
+
+        user_content = text
+        if key_questions:
+            user_content += f"\n\n## Key Questions to Address:\n{key_questions}"
         if output_format:
-            user_content = f"{user_content}\n\n## Output Format\n{output_format}"
+            user_content += f"\n\n## Output Format\n{output_format}"
 
         try:
             resp = await client.chat.completions.create(

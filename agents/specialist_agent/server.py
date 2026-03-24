@@ -108,7 +108,15 @@ def _mount_specialist(app: FastAPI, config: SpecialistConfig, base_url: str) -> 
     )
 
     # Graph introspection endpoint
-    input_fields = config.input_fields
+    input_fields = list(config.input_fields)
+    if not any(f.get("name") == "key_questions" for f in input_fields):
+        input_fields.append({
+            "name": "key_questions",
+            "label": "Key Questions (optional)",
+            "type": "textarea",
+            "required": False,
+            "placeholder": "Specific questions this analysis should address...",
+        })
 
     @app.get(f"/{type_id}/graph", name=f"graph_{type_id}")
     async def get_graph(_executor=executor, _fields=input_fields):
