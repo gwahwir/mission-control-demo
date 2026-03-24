@@ -8,6 +8,7 @@ wait_for_task() to poll until a terminal state is reached.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from pytest_httpx import HTTPXMock
@@ -137,16 +138,11 @@ async def test_get_task_not_found(client):
 # ---------------------------------------------------------------------------
 
 async def test_cancel_task(client, httpx_mock: HTTPXMock):
-    import asyncio
-    from unittest.mock import AsyncMock, patch
-
     hold = asyncio.Event()
 
     async def fake_stream(*args, **kwargs):
         yield {"result": {"status": {"state": "working", "message": {"parts": [{"text": "Running node: process"}]}}}}
         await hold.wait()  # suspend until cancel fires
-
-    task_id_ref = [None]
 
     with patch("control_plane.routes.A2AClient") as MockClient:
         # stream_message keeps the task alive until hold is set
@@ -160,8 +156,7 @@ async def test_cancel_task(client, httpx_mock: HTTPXMock):
 
         resp = await client.post(f"/agents/{FAKE_AGENT_ID}/tasks", json={"text": "to cancel"})
         assert resp.status_code == 202
-        task_id_ref[0] = resp.json()["task_id"]
-        task_id = task_id_ref[0]
+        task_id = resp.json()["task_id"]
 
         # Wait until _run_task has processed the "Running node" event (state=working in record)
         deadline = asyncio.get_event_loop().time() + 5.0

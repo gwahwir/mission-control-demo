@@ -187,6 +187,8 @@ async def _run_task(
                             await _broker.publish(task_id, record.to_dict())
                         except json.JSONDecodeError:
                             logger.warning("node_output_invalid_json", task_id=task_id, node=node_name)
+                    else:
+                        logger.warning("node_output_malformed", task_id=task_id, text=text_val[:100])
                     continue
 
                 # Track currently-running node (non-NODE_OUTPUT working events)
@@ -197,18 +199,25 @@ async def _run_task(
                     await _broker.publish(task_id, record.to_dict())
                     continue
 
+                # TODO: handle "input-required" state — currently silently ignored
                 if state_str in ("completed", "failed", "canceled"):
                     record.state = TaskState(state_str)
                     record.output_text = text_val
                     record.running_node = ""
                     if record.state == TaskState.FAILED:
                         record.error = text_val or "Agent returned failed state with no details"
+                    # Note: record.a2a_task is intentionally not populated in streaming mode.
+                    # The raw agent response is not available as a single object in SSE streaming.
                     break
             else:
                 # Only mark failed if the cancel endpoint hasn't already set a terminal state.
                 # _run_task holds its own in-memory record copy; the cancel endpoint writes
                 # a fresh copy to the store and sets CANCELED — we must not overwrite it.
                 terminal = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+                # Re-read the store: the cancel endpoint may have set CANCELED while we were streaming.
+                # If it has, preserve that state rather than overwriting with FAILED.
+                # Known limitation: if the cancel endpoint's save() races with this get(), metrics
+                # may transiently increment tasks_failed before CANCELED is committed.
                 fresh = await _task_store.get(task_id)
                 if fresh is None or fresh.state not in terminal:
                     record.state = TaskState.FAILED
