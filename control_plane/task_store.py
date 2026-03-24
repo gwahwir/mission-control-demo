@@ -47,6 +47,8 @@ class TaskRecord:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     a2a_task: dict[str, Any] = field(default_factory=dict)
+    node_outputs: dict[str, str] = field(default_factory=dict)
+    running_node: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +63,8 @@ class TaskRecord:
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "node_outputs": self.node_outputs,
+            "running_node": self.running_node,
         }
 
     @classmethod
@@ -68,6 +72,9 @@ class TaskRecord:
         a2a_task = row.get("a2a_task", "{}")
         if isinstance(a2a_task, str):
             a2a_task = json.loads(a2a_task)
+        node_outputs_raw = row.get("node_outputs", "{}")
+        node_outputs = json.loads(node_outputs_raw) if isinstance(node_outputs_raw, str) else (node_outputs_raw or {})
+        running_node = row.get("running_node", "")
         return cls(
             task_id=row["task_id"],
             agent_id=row["agent_id"],
@@ -81,6 +88,8 @@ class TaskRecord:
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
             a2a_task=a2a_task,
+            node_outputs=node_outputs,
+            running_node=running_node,
         )
 
 
@@ -152,17 +161,25 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS baselines TEXT NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS key_questions TEXT NOT NULL DEFAULT '';
 """
 
+_ADD_NODE_OUTPUT_COLUMNS = """
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_outputs TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS running_node TEXT NOT NULL DEFAULT '';
+"""
+
 _UPSERT = """
 INSERT INTO tasks
-    (task_id, agent_id, instance_url, state, input_text, baselines, key_questions, output_text, error, created_at, updated_at, a2a_task)
+    (task_id, agent_id, instance_url, state, input_text, baselines, key_questions,
+     output_text, error, created_at, updated_at, a2a_task, node_outputs, running_node)
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (task_id) DO UPDATE SET
     state        = EXCLUDED.state,
     output_text  = EXCLUDED.output_text,
     error        = EXCLUDED.error,
     updated_at   = EXCLUDED.updated_at,
-    a2a_task     = EXCLUDED.a2a_task;
+    a2a_task     = EXCLUDED.a2a_task,
+    node_outputs = EXCLUDED.node_outputs,
+    running_node = EXCLUDED.running_node;
 """
 
 
@@ -183,6 +200,7 @@ class PostgresTaskStore:
             await conn.execute(_CREATE_TABLE)
             await conn.execute(_ADD_ERROR_COLUMN)
             await conn.execute(_ADD_STRUCTURED_INPUT_COLUMNS)
+            await conn.execute(_ADD_NODE_OUTPUT_COLUMNS)
 
     async def close(self) -> None:
         if self._pool:
@@ -205,6 +223,8 @@ class PostgresTaskStore:
                 record.created_at,
                 record.updated_at,
                 json.dumps(record.a2a_task),
+                json.dumps(record.node_outputs),
+                record.running_node,
             )
 
     async def get(self, task_id: str) -> TaskRecord | None:
