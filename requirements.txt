@@ -24,3 +24,5 @@ langchain==1.2.13
 mem0ai>=1.0.7
 psycopg2==2.9.11
 rank-bm25>=0.2.2
+feedparser>=6.0
+newspaper4k>=0.9
