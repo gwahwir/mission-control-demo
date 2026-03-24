@@ -210,7 +210,7 @@ async def extract_entities_and_issues(
         }
 
     client = _get_openai_client()
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    model = os.getenv("OPENAI_SMALL_MODEL", "gpt-4o-mini")
 
     attempt_label = f"attempt {retry_count + 1}/{MAX_RETRIES}"
     logger.info(
