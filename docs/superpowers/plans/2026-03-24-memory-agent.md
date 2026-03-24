@@ -65,6 +65,16 @@ from a2a.types import TaskState
 
 
 # ---------------------------------------------------------------------------
+# Async generator helper (used by executor write dispatch test)
+# ---------------------------------------------------------------------------
+
+async def _async_gen(items):
+    """Yield items from a list as an async generator (for mocking astream)."""
+    for item in items:
+        yield item
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -1421,13 +1431,13 @@ async def test_executor_write_dispatches_graph_and_emits_completed():
             emitted.append(event)
 
     # Mock the WriteGraph so we don't need real stores
-    mock_graph = AsyncMock()
+    mock_graph = MagicMock()
     mock_graph.astream = MagicMock(return_value=_async_gen([
         {"extract_entities": {"extracted": SAMPLE_EXTRACTION, "retry_count": 0}},
         {"store_memories": {"stored": True, "entities_added": 2, "relationships_added": 1}},
     ]))
 
-    with patch.object(type(executor), "graph", new_callable=lambda: property(lambda self: mock_graph)):
+    with patch.object(executor, "_graph", mock_graph):
         await executor.execute(context, CollectingQueue())
 
     final_event = emitted[-1]
@@ -1436,15 +1446,6 @@ async def test_executor_write_dispatches_graph_and_emits_completed():
     assert output["stored"] is True
     assert output["entities_added"] == 2
     assert output["relationships_added"] == 1
-```
-
-Also add this helper at the top of the test file (after the imports), needed by the write dispatch test:
-
-```python
-async def _async_gen(items):
-    """Yield items from a list as an async generator (for mocking astream)."""
-    for item in items:
-        yield item
 ```
 
 - [ ] **Step 5.2: Run — expect FAIL (`ImportError: cannot import name 'MemoryAgentExecutor'`)**
@@ -1642,21 +1643,6 @@ Expected: All tests pass.
 ```bash
 git add agents/memory_agent/executor.py tests/test_memory_agent.py
 git commit -m "feat(memory-agent): add MemoryAgentExecutor with write/search/traverse dispatch"
-```
-
-- [ ] **Step 5.3: Run the full test suite for the memory agent**
-
-```bash
-pytest tests/test_memory_agent.py -v
-```
-
-Expected: All tests pass. Verify you see tests for: stores env validation (5), extract node (4), store node (3), write graph (2 integration + 1 retry + 1 cancellation), search (3), traverse (2), executor dispatch (2) = ~20 tests.
-
-- [ ] **Step 5.4: Commit**
-
-```bash
-git add tests/test_memory_agent.py
-git commit -m "feat(memory-agent): add executor dispatch tests"
 ```
 
 ---
