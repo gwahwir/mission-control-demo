@@ -17,7 +17,7 @@ This agent does **not** use mem0. It drives `asyncpg` (pgvector) and `langchain_
 
 ```
 agents/memory_agent/
-├── graph.py       # WriteGraph: extract → store (LangGraph, 2 nodes + retry)
+├── graph.py       # WriteGraph: extract → resolve_conflicts → store (LangGraph, 3 nodes + retry)
 ├── stores.py      # Singleton clients for pgvector (asyncpg), Neo4j, and embedder
 ├── executor.py    # Overrides execute() to dispatch write/search/traverse
 ├── server.py      # A2A FastAPI server, port 8009, 3 skills
@@ -34,7 +34,7 @@ Three A2A skills declared on the AgentCard. Callers route to the correct skill b
 
 | Skill ID | `operation` value | Key Input Fields | Output |
 |---|---|---|---|
-| `memory/write` | `"write"` | `text: str`, `namespace: str` | `{ stored: bool, namespace: str, entities_added: int, relationships_added: int }` |
+| `memory/write` | `"write"` | `text: str`, `namespace: str` | `{ stored: bool, namespace: str, entities_added: int, relationships_added: int, memories_updated: int, memories_deleted: int }` |
 | `memory/search` | `"search"` | `query: str`, `namespace: str`, `limit: int` (optional, default 5) | `{ results: [{ content: str, score: float, metadata: { entities: [...], namespace: str, source: str } }] }` |
 | `memory/traverse` | `"traverse"` | `entity: str`, `namespace: str`, `depth: int` (optional, default 2) | `{ nodes: [{ name: str, type: str, namespace: str }], edges: [{ subject: str, predicate: str, object: str, namespace: str }] }` |
 
@@ -87,7 +87,7 @@ execute(context, event_queue):
 
 `task_id` is passed into `search_memories` and `traverse_graph` so they can call `check_cancelled(task_id)`.
 
-`get_graph_topology()` (called by `GET /graph`) uses `build_graph()` and returns the WriteGraph topology — the 2-node write flow (`extract_entities` → `store_memories`). The two direct-call paths (search, traverse) are not LangGraph nodes and are not shown in the dashboard graph; this is acceptable because they are single-step point queries with no branching.
+`get_graph_topology()` (called by `GET /graph`) uses `build_graph()` and returns the WriteGraph topology — the 3-node write flow (`extract_entities` → `resolve_conflicts` → `store_memories`). The two direct-call paths (search, traverse) are not LangGraph nodes and are not shown in the dashboard graph; this is acceptable because they are single-step point queries with no branching.
 
 ---
 
@@ -95,7 +95,7 @@ execute(context, event_queue):
 
 ### Write (`operation: "write"`)
 
-The WriteGraph has **2 nodes**: `extract_entities` and `store_memories`. It follows the same self-correcting retry pattern as `knowledge_graph/graph.py`.
+The WriteGraph has **3 nodes**: `extract_entities`, `resolve_conflicts`, and `store_memories`. It follows the same self-correcting retry pattern as `knowledge_graph/graph.py`.
 
 ```
 raw text + namespace
@@ -104,7 +104,20 @@ raw text + namespace
         LLM call → { entities, relationships, summary }
         on JSON parse failure: increment retry_count, set extracted=None
         conditional edge: if extracted is None and retries < 3, loop back to self
-        conditional edge: if extracted or retries exhausted, go to store_memories
+        conditional edge: if extracted or retries exhausted, go to resolve_conflicts
+
+  → [Node: resolve_conflicts]
+        calls executor.check_cancelled(task_id) at top (via config["configurable"])
+        search pgvector for top-K existing memories in namespace (K=10, cosine similarity)
+        if no existing memories: skip LLM call, pass extracted through unchanged
+        else: batch LLM call with extracted entities + existing memories →
+              list of resolutions: { action: "KEEP"|"UPDATE"|"DELETE", id: uuid, new_content: str }
+              UPDATE: overwrite content + embedding in pgvector row; update Neo4j node properties
+              DELETE: remove pgvector row + Neo4j node; set memories_deleted += 1
+              KEEP: no-op for that existing memory
+              new entities not matched to existing memories proceed to store_memories unchanged
+        on LLM parse failure: log warning, skip conflict resolution, proceed with all extracted as new
+        → store_memories
 
   → [Node: store_memories]
         calls executor.check_cancelled(task_id) at top (via config["configurable"])
@@ -113,7 +126,8 @@ raw text + namespace
         per-item failures: log warning, skip, continue
         → END
 
-  → output state: { stored: bool, namespace: str, entities_added: int, relationships_added: int }
+  → output state: { stored: bool, namespace: str, entities_added: int, relationships_added: int,
+                    memories_updated: int, memories_deleted: int }
 ```
 
 Each node receives `executor` and `task_id` via `config["configurable"]` (same pattern as `knowledge_graph/graph.py` lines 193-195, 301-302).
@@ -155,7 +169,8 @@ CREATE TABLE IF NOT EXISTS memories (
     content     TEXT NOT NULL,
     embedding   vector(1024),
     metadata    JSONB DEFAULT '{}',
-    created_at  TIMESTAMPTZ DEFAULT now()
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    updated_at  TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS memories_namespace_idx ON memories (namespace);
 CREATE INDEX IF NOT EXISTS memories_embedding_idx ON memories
@@ -203,6 +218,7 @@ All three raise `EnvironmentError` on first use if required env vars are missing
 | Scenario | Behavior |
 |---|---|
 | LLM extraction returns invalid JSON | Retry up to 3 times with error context injected into prompt (conditional edge loop) |
+| Conflict resolution LLM returns invalid JSON | Log warning, skip conflict resolution entirely, proceed with all extracted as new inserts |
 | Missing required env vars | `EnvironmentError` on first store access; agent fails to start |
 | Single entity fails to write to Neo4j | Log warning, skip, continue |
 | Single embedding fails to insert into pgvector | Log warning, skip, continue |
@@ -215,7 +231,7 @@ All three raise `EnvironmentError` on first use if required env vars are missing
 
 ## Dashboard — `/graph` Endpoint and `INPUT_FIELDS`
 
-`GET /graph` returns the WriteGraph topology (2 nodes: `extract_entities`, `store_memories`) plus `input_fields` for the dashboard form. Because the dashboard renders one form per agent, `INPUT_FIELDS` exposes the write skill's fields — the primary/most complex operation — as the default form. Search and traverse parameters are documented in the README for programmatic callers.
+`GET /graph` returns the WriteGraph topology (3 nodes: `extract_entities`, `resolve_conflicts`, `store_memories`) plus `input_fields` for the dashboard form. Because the dashboard renders one form per agent, `INPUT_FIELDS` exposes the write skill's fields — the primary/most complex operation — as the default form. Search and traverse parameters are documented in the README for programmatic callers.
 
 ```python
 INPUT_FIELDS = [
@@ -263,7 +279,10 @@ File: `tests/test_memory_agent.py`
 
 | Test | What is mocked | What is asserted |
 |---|---|---|
-| `memory/write` happy path | LLM extraction call + asyncpg pool + Neo4j graph | Output has correct `entities_added`, `relationships_added`, `stored: true` |
+| `memory/write` happy path (no existing memories) | LLM extraction call + asyncpg pool (returns 0 existing rows) + Neo4j graph | Output has correct `entities_added`, `relationships_added`, `memories_updated: 0`, `memories_deleted: 0`, `stored: true` |
+| `memory/write` conflict resolution — UPDATE | LLM extraction + asyncpg pool (returns 1 existing row) + conflict LLM returns UPDATE resolution + asyncpg UPDATE + Neo4j | `memories_updated: 1`, updated row has new content; new entities still inserted |
+| `memory/write` conflict resolution — DELETE | LLM extraction + asyncpg pool (returns 1 existing row) + conflict LLM returns DELETE + asyncpg DELETE + Neo4j node delete | `memories_deleted: 1`; deleted row absent from pool |
+| `memory/write` conflict resolution LLM failure | conflict LLM returns invalid JSON | Warning logged; all extracted entities inserted as new; `memories_updated: 0`, `memories_deleted: 0` |
 | `memory/write` retry | LLM returns invalid JSON on attempt 1, valid on attempt 2 (invoke graph end-to-end; do not call node function directly) | Task completes; `retry_count` field in state = 1 after second attempt |
 | `memory/search` | `stores.get_pgvector_pool` + `stores.get_embedder` | Results are ranked, namespace-filtered, `metadata` is the raw JSONB value |
 | `memory/traverse` | `stores.get_neo4j_graph` | Nodes and edges match expected shape |

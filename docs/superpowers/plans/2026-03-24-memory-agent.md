@@ -4,7 +4,7 @@
 
 **Goal:** Build a dual-store memory agent (pgvector + Neo4j, no mem0) that exposes write/search/traverse skills so any other agent in Mission Control can persist and retrieve memories.
 
-**Architecture:** A LangGraph WriteGraph handles the multi-step write path (LLM extraction → dual-store); search and traverse are direct async functions called from a custom `execute()` override. All three operations are exposed as A2A skills on port 8009.
+**Architecture:** A LangGraph WriteGraph handles the multi-step write path (LLM extraction → conflict resolution → dual-store); search and traverse are direct async functions called from a custom `execute()` override. All three operations are exposed as A2A skills on port 8009.
 
 **Tech Stack:** `asyncpg` (pgvector), `langchain_neo4j` (Neo4j), `openai` (embeddings + LLM extraction), `langgraph`, `a2a-sdk[http-server]`
 
@@ -18,12 +18,12 @@
 |---|---|---|
 | `agents/memory_agent/__init__.py` | Create | Package marker |
 | `agents/memory_agent/stores.py` | Create | Lazy singletons: pgvector pool, Neo4j graph, embedder |
-| `agents/memory_agent/graph.py` | Create | WriteGraph state, extract_entities node, store_memories node |
+| `agents/memory_agent/graph.py` | Create | WriteGraph state, extract_entities node, resolve_conflicts node, store_memories node |
 | `agents/memory_agent/executor.py` | Create | MemoryAgentExecutor with execute() override; _search_memories(), _traverse_graph() |
 | `agents/memory_agent/server.py` | Create | A2A FastAPI app, port 8009, 3 skills, /graph endpoint |
 | `agents/memory_agent/README.md` | Create | Docs |
 | `agents/memory_agent/__init__.py` | Create | Empty package marker |
-| `tests/test_memory_agent.py` | Create | All 8 test cases |
+| `tests/test_memory_agent.py` | Create | All test cases (stores, extract, resolve_conflicts, store, executor dispatch, search, traverse) |
 | `Dockerfile.memory-agent` | Create | Container build |
 | `docker-compose.yml` | Modify | Add memory-agent service |
 | `run-local.sh` | Modify | Add memory-agent startup step |
@@ -480,6 +480,8 @@ class MemoryWriteState(TypedDict):
     stored: bool
     entities_added: int
     relationships_added: int
+    memories_updated: int
+    memories_deleted: int
 
 
 # ---------------------------------------------------------------------------
@@ -592,13 +594,379 @@ git commit -m "feat(memory-agent): add extract_entities node with self-correctin
 
 ---
 
-## Task 3: `graph.py` — `store_memories` node + compiled graph
+## Task 3: `graph.py` — `resolve_conflicts` node
+
+**Files:**
+- Modify: `agents/memory_agent/graph.py` (append resolve_conflicts node)
+- Test: `tests/test_memory_agent.py` (append)
+
+The `resolve_conflicts` node runs after extraction. It searches existing memories in the namespace for semantic matches, then asks the LLM to decide which existing memories to KEEP, UPDATE (overwrite with new content), or DELETE. If there are no existing memories, or if the LLM returns invalid JSON, the node passes extracted through unchanged (graceful fallback).
+
+- [ ] **Step 3.1: Append failing tests for `resolve_conflicts`**
+
+Append to `tests/test_memory_agent.py`:
+
+```python
+# ---------------------------------------------------------------------------
+# graph.py — resolve_conflicts node
+# ---------------------------------------------------------------------------
+
+CONFLICT_BASE_STATE = {
+    "input": "Apple acquired Beats in 2014.",
+    "namespace": "test_ns",
+    "extracted": dict(SAMPLE_EXTRACTION),  # copy so tests don't share mutable state
+    "retry_count": 0,
+    "last_raw": "",
+    "last_error": "",
+    "stored": False,
+    "entities_added": 0,
+    "relationships_added": 0,
+    "memories_updated": 0,
+    "memories_deleted": 0,
+}
+
+
+@pytest.mark.asyncio
+async def test_resolve_conflicts_no_existing_memories():
+    """When no existing memories match, extracted passes through unchanged — no LLM call."""
+    from agents.memory_agent.graph import resolve_conflicts
+
+    mock_pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.fetch = AsyncMock(return_value=[])  # no existing memories
+
+    with patch("agents.memory_agent.graph.get_pgvector_pool", return_value=mock_pool), \
+         patch("agents.memory_agent.graph.embed_text", AsyncMock(return_value=[0.1] * 10)), \
+         patch("agents.memory_agent.graph._get_openai_client") as mock_llm_fn:
+        result = await resolve_conflicts(dict(CONFLICT_BASE_STATE), make_config())
+
+    # No conflict LLM call when no existing memories
+    mock_llm_fn.assert_not_called()
+    assert result["extracted"] == SAMPLE_EXTRACTION
+    assert result["memories_updated"] == 0
+    assert result["memories_deleted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_conflicts_update_resolution():
+    """UPDATE resolution: existing memory row is overwritten with new content."""
+    from agents.memory_agent.graph import resolve_conflicts
+
+    existing_row = {
+        "id": "row-uuid-1",
+        "content": "Organization: Apple (old)",
+        "score": 0.92,
+        "metadata": json.dumps({"entities": ["Apple"], "namespace": "test_ns", "source": "write"}),
+    }
+
+    mock_pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.fetch = AsyncMock(return_value=[existing_row])
+    mock_conn.execute = AsyncMock()
+
+    resolution_response = MagicMock()
+    resolution_response.choices[0].message.content = json.dumps([
+        {"action": "UPDATE", "id": "row-uuid-1", "new_content": "Organization: Apple (updated)"}
+    ])
+
+    with patch("agents.memory_agent.graph.get_pgvector_pool", return_value=mock_pool), \
+         patch("agents.memory_agent.graph.embed_text", AsyncMock(return_value=[0.2] * 10)), \
+         patch("agents.memory_agent.graph._get_openai_client") as mock_llm_fn:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resolution_response)
+        mock_llm_fn.return_value = mock_client
+        result = await resolve_conflicts(dict(CONFLICT_BASE_STATE), make_config())
+
+    assert result["memories_updated"] == 1
+    assert result["memories_deleted"] == 0
+    # UPDATE issues an asyncpg execute call for the row
+    mock_conn.execute.assert_called()
+    update_call_args = str(mock_conn.execute.call_args_list)
+    assert "UPDATE" in update_call_args.upper() or "row-uuid-1" in update_call_args
+
+
+@pytest.mark.asyncio
+async def test_resolve_conflicts_delete_resolution():
+    """DELETE resolution: existing memory row is removed from pgvector and Neo4j."""
+    from agents.memory_agent.graph import resolve_conflicts
+
+    existing_row = {
+        "id": "row-uuid-2",
+        "content": "Organization: Beats (stale)",
+        "score": 0.88,
+        "metadata": json.dumps({"entities": ["Beats"], "namespace": "test_ns", "source": "write"}),
+    }
+
+    mock_pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.fetch = AsyncMock(return_value=[existing_row])
+    mock_conn.execute = AsyncMock()
+
+    mock_neo4j = MagicMock()
+    mock_neo4j.query = MagicMock(return_value=[])
+
+    resolution_response = MagicMock()
+    resolution_response.choices[0].message.content = json.dumps([
+        {"action": "DELETE", "id": "row-uuid-2"}
+    ])
+
+    with patch("agents.memory_agent.graph.get_pgvector_pool", return_value=mock_pool), \
+         patch("agents.memory_agent.graph.get_neo4j_graph", return_value=mock_neo4j), \
+         patch("agents.memory_agent.graph.embed_text", AsyncMock(return_value=[0.1] * 10)), \
+         patch("agents.memory_agent.graph._get_openai_client") as mock_llm_fn:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resolution_response)
+        mock_llm_fn.return_value = mock_client
+        result = await resolve_conflicts(dict(CONFLICT_BASE_STATE), make_config())
+
+    assert result["memories_deleted"] == 1
+    assert result["memories_updated"] == 0
+    # DELETE issues a pgvector DELETE call
+    delete_call_args = str(mock_conn.execute.call_args_list)
+    assert "DELETE" in delete_call_args.upper() or "row-uuid-2" in delete_call_args
+
+
+@pytest.mark.asyncio
+async def test_resolve_conflicts_llm_failure_fallback():
+    """If conflict LLM returns invalid JSON, log warning and pass extracted through unchanged."""
+    from agents.memory_agent.graph import resolve_conflicts
+
+    existing_row = {
+        "id": "row-uuid-3",
+        "content": "Organization: Apple (existing)",
+        "score": 0.90,
+        "metadata": json.dumps({"entities": ["Apple"], "namespace": "test_ns", "source": "write"}),
+    }
+
+    mock_pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.fetch = AsyncMock(return_value=[existing_row])
+
+    bad_response = MagicMock()
+    bad_response.choices[0].message.content = "not valid json {{{"
+
+    with patch("agents.memory_agent.graph.get_pgvector_pool", return_value=mock_pool), \
+         patch("agents.memory_agent.graph.embed_text", AsyncMock(return_value=[0.1] * 10)), \
+         patch("agents.memory_agent.graph._get_openai_client") as mock_llm_fn:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=bad_response)
+        mock_llm_fn.return_value = mock_client
+        result = await resolve_conflicts(dict(CONFLICT_BASE_STATE), make_config())
+
+    # Fallback: extracted unchanged, no updates or deletes
+    assert result["extracted"] == SAMPLE_EXTRACTION
+    assert result["memories_updated"] == 0
+    assert result["memories_deleted"] == 0
+```
+
+- [ ] **Step 3.2: Run — expect FAIL**
+
+```bash
+pytest tests/test_memory_agent.py::test_resolve_conflicts_no_existing_memories -v
+```
+
+Expected: `ImportError` — `resolve_conflicts` not yet defined.
+
+- [ ] **Step 3.3: Implement `resolve_conflicts` node — append to `graph.py`**
+
+Append after the `extract_entities` node implementation in `graph.py`:
+
+```python
+# ---------------------------------------------------------------------------
+# Conflict resolution prompt
+# ---------------------------------------------------------------------------
+
+_CONFLICT_SYSTEM_PROMPT = """\
+You are a memory conflict resolver. You are given newly extracted information and a list of
+existing memory records. Decide what to do with each existing record.
+
+For each existing record, return one of:
+  - {"action": "KEEP",   "id": "<uuid>"}
+  - {"action": "UPDATE", "id": "<uuid>", "new_content": "<updated text>"}
+  - {"action": "DELETE", "id": "<uuid>"}
+
+Rules:
+- KEEP: the existing record is still accurate and not superseded.
+- UPDATE: the existing record is outdated or incomplete — replace its content with new_content.
+- DELETE: the existing record is factually contradicted by the new information.
+- Return ONLY a valid JSON array of resolution objects — no markdown, no commentary.
+- Only include records that need action. Omit IDs not mentioned.
+"""
+
+CONFLICT_SEARCH_LIMIT = 10
+
+
+# ---------------------------------------------------------------------------
+# Node 2: resolve_conflicts
+# ---------------------------------------------------------------------------
+
+async def resolve_conflicts(
+    state: MemoryWriteState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Search existing memories for conflicts and apply KEEP/UPDATE/DELETE resolutions."""
+    executor = config["configurable"]["executor"]
+    task_id = config["configurable"]["task_id"]
+    executor.check_cancelled(task_id)
+
+    extracted = state.get("extracted") or {"entities": [], "relationships": [], "summary": ""}
+    namespace = state.get("namespace", "")
+
+    # Build a query string from extracted entities + summary for similarity search
+    entity_names = [e.get("name", "") for e in extracted.get("entities", []) if e.get("name")]
+    query_text = extracted.get("summary", "") or " ".join(entity_names)
+
+    if not query_text:
+        # Nothing to compare against — skip
+        return {"extracted": extracted, "memories_updated": 0, "memories_deleted": 0}
+
+    pool = await get_pgvector_pool()
+    query_vec = await embed_text(query_text)
+    query_vec_str = "[" + ",".join(str(x) for x in query_vec) + "]"
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, content, metadata, "
+            "1 - (embedding <=> $1::vector) AS score "
+            "FROM memories WHERE namespace = $2 "
+            "ORDER BY embedding <=> $1::vector LIMIT $3",
+            query_vec_str, namespace, CONFLICT_SEARCH_LIMIT,
+        )
+
+    if not rows:
+        # No existing memories — no conflicts possible
+        return {"extracted": extracted, "memories_updated": 0, "memories_deleted": 0}
+
+    # Build context for the LLM
+    existing_summary = "\n".join(
+        f'- id={r["id"]} score={r["score"]:.2f}: {r["content"]}'
+        for r in rows
+    )
+    new_info = "\n".join(
+        f"- {e.get('type', 'entity')}: {e.get('name', '')}"
+        for e in extracted.get("entities", [])
+    )
+    if extracted.get("summary"):
+        new_info += f"\nSummary: {extracted['summary']}"
+
+    client = _get_openai_client()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    user_msg = (
+        f"Newly extracted information:\n{new_info}\n\n"
+        f"Existing memory records:\n{existing_summary}\n\n"
+        "Return a JSON array of resolution objects for any existing records that need action."
+    )
+
+    memories_updated = 0
+    memories_deleted = 0
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CONFLICT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.0,
+            max_completion_tokens=2048,
+            timeout=60,
+        )
+        raw = response.choices[0].message.content or ""
+        resolutions = json.loads(raw)
+
+        for resolution in resolutions:
+            action = resolution.get("action", "").upper()
+            row_id = resolution.get("id", "")
+            if not row_id:
+                continue
+
+            if action == "UPDATE":
+                new_content = resolution.get("new_content", "")
+                if not new_content:
+                    continue
+                try:
+                    new_vec = await embed_text(new_content)
+                    new_vec_str = "[" + ",".join(str(x) for x in new_vec) + "]"
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE memories SET content = $1, embedding = $2::vector, "
+                            "updated_at = now() WHERE id = $3::uuid",
+                            new_content, new_vec_str, row_id,
+                        )
+                    memories_updated += 1
+                except Exception as e:
+                    logger.warning("[%s] resolve_conflicts: UPDATE failed for %s — %s", task_id, row_id, e)
+
+            elif action == "DELETE":
+                try:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "DELETE FROM memories WHERE id = $1::uuid", row_id
+                        )
+                    # Best-effort Neo4j node delete (match by id stored in metadata)
+                    neo4j = get_neo4j_graph()
+                    # Find content to match entity name — skip if Neo4j unavailable
+                    matching_rows = [r for r in rows if r["id"] == row_id]
+                    if matching_rows:
+                        metadata_raw = matching_rows[0]["metadata"]
+                        try:
+                            meta = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+                            for entity_name in meta.get("entities", []):
+                                await asyncio.to_thread(
+                                    neo4j.query,
+                                    "MATCH (e:Entity {name: $name, namespace: $ns}) DETACH DELETE e",
+                                    {"name": entity_name, "ns": namespace},
+                                )
+                        except Exception as e:
+                            logger.warning("[%s] resolve_conflicts: Neo4j delete failed — %s", task_id, e)
+                    memories_deleted += 1
+                except Exception as e:
+                    logger.warning("[%s] resolve_conflicts: DELETE failed for %s — %s", task_id, row_id, e)
+
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(
+            "[%s] resolve_conflicts: LLM returned invalid JSON, skipping conflict resolution — %s",
+            task_id, e,
+        )
+
+    return {
+        "extracted": extracted,
+        "memories_updated": memories_updated,
+        "memories_deleted": memories_deleted,
+    }
+```
+
+- [ ] **Step 3.4: Run resolve_conflicts tests — expect PASS**
+
+```bash
+pytest tests/test_memory_agent.py::test_resolve_conflicts_no_existing_memories tests/test_memory_agent.py::test_resolve_conflicts_update_resolution tests/test_memory_agent.py::test_resolve_conflicts_delete_resolution tests/test_memory_agent.py::test_resolve_conflicts_llm_failure_fallback -v
+```
+
+Expected: 4 passed.
+
+- [ ] **Step 3.5: Commit**
+
+```bash
+git add agents/memory_agent/graph.py tests/test_memory_agent.py
+git commit -m "feat(memory-agent): add resolve_conflicts node with KEEP/UPDATE/DELETE resolutions"
+```
+
+---
+
+## Task 4: `graph.py` — `store_memories` node + compiled graph
 
 **Files:**
 - Modify: `agents/memory_agent/graph.py` (append store node + graph builder)
 - Test: `tests/test_memory_agent.py` (append)
 
-- [ ] **Step 3.1: Append failing tests for the store node and full graph**
+- [ ] **Step 4.1: Append failing tests for the store node and full graph**
 
 Append to `tests/test_memory_agent.py`:
 
@@ -748,6 +1116,7 @@ async def test_write_graph_full_pipeline():
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     mock_conn.execute = AsyncMock()
+    mock_conn.fetch = AsyncMock(return_value=[])  # no existing memories → resolve_conflicts skips LLM
 
     mock_neo4j = MagicMock()
     mock_neo4j.query = MagicMock(return_value=[])
@@ -773,6 +1142,8 @@ async def test_write_graph_full_pipeline():
                 "stored": False,
                 "entities_added": 0,
                 "relationships_added": 0,
+                "memories_updated": 0,
+                "memories_deleted": 0,
             },
             config={"configurable": {"executor": executor, "task_id": "t1", "context_id": "c1"}},
         )
@@ -780,6 +1151,8 @@ async def test_write_graph_full_pipeline():
     assert result["stored"] is True
     assert result["entities_added"] == 2
     assert result["relationships_added"] == 1
+    assert result["memories_updated"] == 0
+    assert result["memories_deleted"] == 0
 
 
 @pytest.mark.asyncio
@@ -805,6 +1178,7 @@ async def test_write_graph_retry_succeeds_on_second_attempt():
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     mock_conn.execute = AsyncMock()
+    mock_conn.fetch = AsyncMock(return_value=[])  # no existing memories
     mock_neo4j = MagicMock()
     mock_neo4j.query = MagicMock(return_value=[])
     executor = MagicMock()
@@ -829,6 +1203,8 @@ async def test_write_graph_retry_succeeds_on_second_attempt():
                 "stored": False,
                 "entities_added": 0,
                 "relationships_added": 0,
+                "memories_updated": 0,
+                "memories_deleted": 0,
             },
             config={"configurable": {"executor": executor, "task_id": "t2", "context_id": "c2"}},
         )
@@ -841,7 +1217,7 @@ async def test_write_graph_retry_succeeds_on_second_attempt():
 async def test_write_graph_cancellation():
     """check_cancelled() is called in each node — raises CancelledError immediately."""
     import asyncio
-    from agents.memory_agent.graph import extract_entities, store_memories
+    from agents.memory_agent.graph import extract_entities, resolve_conflicts, store_memories
     from agents.base.cancellation import CancellableMixin
 
     class CancellingExecutor(CancellableMixin):
@@ -856,16 +1232,20 @@ async def test_write_graph_cancellation():
         "input": "text", "namespace": "ns",
         "extracted": None, "retry_count": 0, "last_raw": "", "last_error": "",
         "stored": False, "entities_added": 0, "relationships_added": 0,
+        "memories_updated": 0, "memories_deleted": 0,
     }
     with pytest.raises(asyncio.CancelledError):
         await extract_entities(state, config)
 
     state2 = {**state, "extracted": SAMPLE_EXTRACTION}
     with pytest.raises(asyncio.CancelledError):
+        await resolve_conflicts(state2, config)
+
+    with pytest.raises(asyncio.CancelledError):
         await store_memories(state2, config)
 ```
 
-- [ ] **Step 3.2: Run — expect FAIL**
+- [ ] **Step 4.2: Run — expect FAIL**
 
 ```bash
 pytest tests/test_memory_agent.py::test_store_memories_happy_path tests/test_memory_agent.py::test_write_graph_full_pipeline -v
@@ -873,9 +1253,9 @@ pytest tests/test_memory_agent.py::test_store_memories_happy_path tests/test_mem
 
 Expected: `ImportError` — `store_memories` and `build_memory_write_graph` not yet defined.
 
-- [ ] **Step 3.3: Append `store_memories` node and graph builder to `graph.py`**
+- [ ] **Step 4.3: Append `store_memories` node and graph builder to `graph.py`**
 
-Add the following imports at the top of `graph.py` (after the existing imports):
+Add the following imports at the top of `graph.py` (after the existing imports), if not already added by Task 3:
 
 ```python
 from agents.memory_agent.stores import embed_text, get_neo4j_graph, get_pgvector_pool
@@ -890,9 +1270,9 @@ Then append to `graph.py`:
 
 def _route_after_extract(state: MemoryWriteState) -> str:
     if state.get("extracted") is not None:
-        return "store_memories"
+        return "resolve_conflicts"
     if state.get("retry_count", 0) >= MAX_RETRIES:
-        return "store_memories"
+        return "resolve_conflicts"
     return "extract_entities"
 
 
@@ -1009,6 +1389,7 @@ async def store_memories(
         "stored": any_stored,
         "entities_added": entities_added,
         "relationships_added": relationships_added,
+        # memories_updated/deleted come from resolve_conflicts node — pass through unchanged
     }
 
 
@@ -1019,6 +1400,7 @@ async def store_memories(
 def build_memory_write_graph() -> CompiledStateGraph:
     graph = StateGraph(MemoryWriteState)
     graph.add_node("extract_entities", extract_entities)
+    graph.add_node("resolve_conflicts", resolve_conflicts)
     graph.add_node("store_memories", store_memories)
     graph.set_entry_point("extract_entities")
     graph.add_conditional_edges(
@@ -1026,16 +1408,17 @@ def build_memory_write_graph() -> CompiledStateGraph:
         _route_after_extract,
         {
             "extract_entities": "extract_entities",
-            "store_memories": "store_memories",
+            "resolve_conflicts": "resolve_conflicts",
         },
     )
+    graph.add_edge("resolve_conflicts", "store_memories")
     graph.add_edge("store_memories", END)
     return graph.compile()
 ```
 
 Also add `import asyncio` and `import json` at the top of `graph.py` if not already present (they should be after Task 2's implementation).
 
-- [ ] **Step 3.4: Run all graph tests — expect PASS**
+- [ ] **Step 4.4: Run all graph tests — expect PASS**
 
 ```bash
 pytest tests/test_memory_agent.py -k "extract or store or write_graph" -v
@@ -1043,7 +1426,7 @@ pytest tests/test_memory_agent.py -k "extract or store or write_graph" -v
 
 Expected: All graph-related tests pass.
 
-- [ ] **Step 3.5: Commit**
+- [ ] **Step 4.5: Commit**
 
 ```bash
 git add agents/memory_agent/graph.py tests/test_memory_agent.py
@@ -1052,13 +1435,13 @@ git commit -m "feat(memory-agent): add store_memories node and compile WriteGrap
 
 ---
 
-## Task 4: `executor.py` — `_search_memories` and `_traverse_graph` helpers only
+## Task 5: `executor.py` — `_search_memories` and `_traverse_graph` helpers only
 
 **Files:**
 - Create: `agents/memory_agent/executor.py` (helpers only — `MemoryAgentExecutor` added in Task 5)
 - Test: `tests/test_memory_agent.py` (append)
 
-- [ ] **Step 4.1: Append failing tests for search and traverse**
+- [ ] **Step 5.1: Append failing tests for search and traverse**
 
 Append to `tests/test_memory_agent.py`:
 
@@ -1207,7 +1590,7 @@ async def test_traverse_graph_cancellation():
         )
 ```
 
-- [ ] **Step 4.2: Run — expect FAIL**
+- [ ] **Step 5.2: Run — expect FAIL**
 
 ```bash
 pytest tests/test_memory_agent.py::test_search_memories_returns_ranked_results -v
@@ -1215,7 +1598,7 @@ pytest tests/test_memory_agent.py::test_search_memories_returns_ranked_results -
 
 Expected: `ModuleNotFoundError: No module named 'agents.memory_agent.executor'`
 
-- [ ] **Step 4.3: Create `executor.py` with ONLY the search and traverse helpers (no `MemoryAgentExecutor` yet)**
+- [ ] **Step 5.3: Create `executor.py` with ONLY the search and traverse helpers (no `MemoryAgentExecutor` yet)**
 
 ```python
 """Executor for the memory agent, with multi-skill dispatch."""
@@ -1326,7 +1709,7 @@ async def _traverse_graph(
 
 **Note:** `MemoryAgentExecutor` is NOT included here yet — it will be added in Task 5 after its tests are written first.
 
-- [ ] **Step 4.4: Run search and traverse tests — expect PASS**
+- [ ] **Step 5.4: Run search and traverse tests — expect PASS**
 
 ```bash
 pytest tests/test_memory_agent.py -k "search or traverse" -v
@@ -1334,7 +1717,7 @@ pytest tests/test_memory_agent.py -k "search or traverse" -v
 
 Expected: All search/traverse tests pass.
 
-- [ ] **Step 4.5: Commit**
+- [ ] **Step 5.5: Commit**
 
 ```bash
 git add agents/memory_agent/executor.py tests/test_memory_agent.py
@@ -1343,13 +1726,13 @@ git commit -m "feat(memory-agent): add executor with search and traverse helpers
 
 ---
 
-## Task 5: `executor.py` — `MemoryAgentExecutor` (TDD)
+## Task 6: `executor.py` — `MemoryAgentExecutor` (TDD)
 
 **Files:**
 - Modify: `agents/memory_agent/executor.py` (append `MemoryAgentExecutor` class)
 - Test: `tests/test_memory_agent.py` (append — tests written BEFORE the class is implemented)
 
-- [ ] **Step 5.1: Append failing dispatch tests (RED — MemoryAgentExecutor does not exist yet)**
+- [ ] **Step 6.1: Append failing dispatch tests (RED — MemoryAgentExecutor does not exist yet)**
 
 Append to `tests/test_memory_agent.py`:
 
@@ -1448,7 +1831,7 @@ async def test_executor_write_dispatches_graph_and_emits_completed():
     assert output["relationships_added"] == 1
 ```
 
-- [ ] **Step 5.2: Run — expect FAIL (`ImportError: cannot import name 'MemoryAgentExecutor'`)**
+- [ ] **Step 6.2: Run — expect FAIL (`ImportError: cannot import name 'MemoryAgentExecutor'`)**
 
 ```bash
 pytest tests/test_memory_agent.py::test_executor_unknown_operation_emits_failed -v
@@ -1456,7 +1839,7 @@ pytest tests/test_memory_agent.py::test_executor_unknown_operation_emits_failed 
 
 Expected: `ImportError` — `MemoryAgentExecutor` not defined yet.
 
-- [ ] **Step 5.3: Append `MemoryAgentExecutor` to `executor.py`**
+- [ ] **Step 6.3: Append `MemoryAgentExecutor` to `executor.py`**
 
 Append to `agents/memory_agent/executor.py` (add necessary imports at top of file first):
 
@@ -1622,7 +2005,7 @@ class MemoryAgentExecutor(LangGraphA2AExecutor):
             self.cleanup_task(task_id)
 ```
 
-- [ ] **Step 5.4: Run all executor dispatch tests — expect PASS**
+- [ ] **Step 6.4: Run all executor dispatch tests — expect PASS**
 
 ```bash
 pytest tests/test_memory_agent.py -k "executor" -v
@@ -1630,7 +2013,7 @@ pytest tests/test_memory_agent.py -k "executor" -v
 
 Expected: 3 passed (`unknown_operation`, `invalid_json`, `write_dispatches_graph`).
 
-- [ ] **Step 5.5: Run full test suite**
+- [ ] **Step 6.5: Run full test suite**
 
 ```bash
 pytest tests/test_memory_agent.py -v
@@ -1638,7 +2021,7 @@ pytest tests/test_memory_agent.py -v
 
 Expected: All tests pass.
 
-- [ ] **Step 5.6: Commit**
+- [ ] **Step 6.6: Commit**
 
 ```bash
 git add agents/memory_agent/executor.py tests/test_memory_agent.py
@@ -1647,14 +2030,14 @@ git commit -m "feat(memory-agent): add MemoryAgentExecutor with write/search/tra
 
 ---
 
-## Task 6: `server.py` — A2A app wiring
+## Task 7: `server.py` — A2A app wiring
 
 **Files:**
 - Create: `agents/memory_agent/server.py`
 
 No new tests needed — server.py is pure wiring with no logic.
 
-- [ ] **Step 6.1: Create `server.py`**
+- [ ] **Step 7.1: Create `server.py`**
 
 ```python
 """Standalone A2A server for the Memory Agent.
@@ -1832,7 +2215,7 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT, timeout_graceful_shutdown=15)
 ```
 
-- [ ] **Step 6.2: Verify imports work**
+- [ ] **Step 7.2: Verify imports work**
 
 ```bash
 python -c "from agents.memory_agent.server import create_app; print('OK')"
@@ -1840,7 +2223,7 @@ python -c "from agents.memory_agent.server import create_app; print('OK')"
 
 Expected: `OK`
 
-- [ ] **Step 6.3: Commit**
+- [ ] **Step 7.3: Commit**
 
 ```bash
 git add agents/memory_agent/server.py
@@ -1849,7 +2232,7 @@ git commit -m "feat(memory-agent): add A2A server with 3 skills on port 8009"
 
 ---
 
-## Task 7: Deployment files
+## Task 8: Deployment files
 
 **Files:**
 - Create: `Dockerfile.memory-agent`
@@ -1857,7 +2240,7 @@ git commit -m "feat(memory-agent): add A2A server with 3 skills on port 8009"
 - Modify: `run-local.sh`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 7.1: Create `Dockerfile.memory-agent`**
+- [ ] **Step 8.1: Create `Dockerfile.memory-agent`**
 
 ```dockerfile
 FROM python:3.13-slim
@@ -1874,7 +2257,7 @@ EXPOSE 8009
 CMD ["python", "-m", "agents.memory_agent.server"]
 ```
 
-- [ ] **Step 7.2: Add memory-agent service to `docker-compose.yml`**
+- [ ] **Step 8.2: Add memory-agent service to `docker-compose.yml`**
 
 Find the closing `# ── React Dashboard` comment in `docker-compose.yml`. Insert the new service block immediately before it:
 
@@ -1917,7 +2300,7 @@ Find the closing `# ── React Dashboard` comment in `docker-compose.yml`. Ins
       start_period: 15s
 ```
 
-- [ ] **Step 7.3: Update `run-local.sh`**
+- [ ] **Step 8.3: Update `run-local.sh`**
 
 Change the existing `[10/10] Starting Dashboard` line to `[11/11]` and insert a new step 10 before it:
 
@@ -1947,7 +2330,7 @@ echo "  Memory Agent:   http://localhost:$MEMORY_PORT"
 
 And update `[10/10] Starting Dashboard` → `[11/11] Starting Dashboard`.
 
-- [ ] **Step 7.4: Update `CLAUDE.md`**
+- [ ] **Step 8.4: Update `CLAUDE.md`**
 
 In the agents table, add a new row:
 
@@ -1972,7 +2355,7 @@ In the "Shared Agent Variables" table (or a new "Memory Agent Variables" section
 | `MEMORY_EMBEDDING_DIMS` | — | Vector dims — must match model, no default (memory agent only, required) |
 ```
 
-- [ ] **Step 7.5: Commit**
+- [ ] **Step 8.5: Commit**
 
 ```bash
 git add Dockerfile.memory-agent docker-compose.yml run-local.sh CLAUDE.md
@@ -1981,12 +2364,12 @@ git commit -m "feat(memory-agent): add Dockerfile, docker-compose service, run-l
 
 ---
 
-## Task 8: `README.md`
+## Task 9: `README.md`
 
 **Files:**
 - Create: `agents/memory_agent/README.md`
 
-- [ ] **Step 8.1: Create README**
+- [ ] **Step 9.1: Create README**
 
 ```markdown
 # Memory Agent
@@ -2117,7 +2500,7 @@ Search and traverse are direct function calls with no graph nodes.
 - `(a)-[:RELATES { predicate, namespace }]->(b)` relationships
 ```
 
-- [ ] **Step 8.2: Run full test suite to confirm nothing broken**
+- [ ] **Step 9.2: Run full test suite to confirm nothing broken**
 
 ```bash
 pytest tests/test_memory_agent.py -v
@@ -2125,7 +2508,7 @@ pytest tests/test_memory_agent.py -v
 
 Expected: All tests pass.
 
-- [ ] **Step 8.3: Commit**
+- [ ] **Step 9.3: Commit**
 
 ```bash
 git add agents/memory_agent/README.md
