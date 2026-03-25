@@ -103,59 +103,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # ── Summarizer Agent ────────────────────────────────────────────────────────
-  summarizer:
-    build:
-      context: .
-      dockerfile: Dockerfile.summarizer
-    ports:
-      - "8002:8002"
-    environment:
-      - LOG_LEVEL=INFO
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      - CONTROL_PLANE_URL=http://control-plane:8000
-      - SUMMARIZER_AGENT_URL=http://summarizer:8002
-    env_file: ".env"
-    networks:
-      - mc-net
-    depends_on:
-      control-plane:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/.well-known/agent-card.json').raise_for_status()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # ── Echo Agent ─────────────────────────────────────────────────────────────
-  echo-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    ports:
-      - "8001:8001"
-    environment:
-      - LOG_LEVEL=INFO
-      - DOWNSTREAM_AGENT_URL=http://summarizer:8002
-      - CONTROL_PLANE_URL=http://control-plane:8000
-      - ECHO_AGENT_URL=http://echo-agent:8001
-    networks:
-      - mc-net
-    depends_on:
-      control-plane:
-        condition: service_healthy
-      summarizer:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/.well-known/agent-card.json').raise_for_status()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
   # ── Relevancy Agent ──────────────────────────────────────────────────────────
   relevancy:
     build:
@@ -178,33 +125,6 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8003/.well-known/agent-card.json').raise_for_status()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # ── Extraction Agent ───────────────────────────────────────────────────────
-  extraction:
-    build:
-      context: .
-      dockerfile: Dockerfile.extraction
-    ports:
-      - "8004:8004"
-    environment:
-      - LOG_LEVEL=INFO
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      - CONTROL_PLANE_URL=http://control-plane:8000
-      - EXTRACTION_AGENT_URL=http://extraction:8004
-    env_file: ".env"
-    networks:
-      - mc-net
-    depends_on:
-      control-plane:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8004/.well-known/agent-card.json').raise_for_status()"]
       interval: 10s
       timeout: 5s
       retries: 5
