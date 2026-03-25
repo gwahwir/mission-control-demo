@@ -7,23 +7,46 @@ Both raise EnvironmentError if required env vars are missing.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import logging
+import threading
 from typing import Callable, Optional
 
 import asyncpg
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
 _pool: Optional[asyncpg.Pool] = None
 _embedder: Optional[Callable] = None
 
+_pool_lock: asyncio.Lock | None = None
+_embedder_lock = threading.Lock()
+
+
+def _get_pool_lock() -> asyncio.Lock:
+    global _pool_lock
+    if _pool_lock is None:
+        _pool_lock = asyncio.Lock()
+    return _pool_lock
+
 
 def _get_dims() -> int:
     raw = os.getenv("BASELINE_EMBEDDING_DIMS")
     if not raw:
         raise EnvironmentError("BASELINE_EMBEDDING_DIMS is required and must match the embedding model output dimensions")
-    return int(raw)
+    try:
+        dims = int(raw)
+    except ValueError:
+        raise EnvironmentError(
+            f"BASELINE_EMBEDDING_DIMS must be a positive integer, got: {raw!r}"
+        )
+    if dims <= 0:
+        raise EnvironmentError(
+            f"BASELINE_EMBEDDING_DIMS must be a positive integer, got: {dims}"
+        )
+    return dims
 
 
 # DDL — executed once on first pool access
@@ -78,39 +101,44 @@ async def get_pgvector_pool() -> asyncpg.Pool:
     global _pool
     if _pool is not None:
         return _pool
-    dsn = os.getenv("BASELINE_PG_DSN")
-    if not dsn:
-        raise EnvironmentError("BASELINE_PG_DSN is required")
-    dims = _get_dims()
-    pool = await asyncpg.create_pool(dsn)
-    async with pool.acquire() as conn:
-        await conn.execute(_build_ddl(dims))
-    _pool = pool
-    logger.info("asyncpg pool created and DDL applied (dims=%d)", dims)
-    return _pool
+    async with _get_pool_lock():
+        if _pool is not None:   # re-check inside lock
+            return _pool
+        dsn = os.getenv("BASELINE_PG_DSN")
+        if not dsn:
+            raise EnvironmentError("BASELINE_PG_DSN is required")
+        dims = _get_dims()
+        pool = await asyncpg.create_pool(dsn)
+        async with pool.acquire() as conn:
+            await conn.execute(_build_ddl(dims))
+        _pool = pool
+        logger.info("asyncpg pool created and DDL applied (dims=%d)", dims)
+        return _pool
 
 
 def get_embedder() -> Callable:
     global _embedder
     if _embedder is not None:
         return _embedder
-    model = os.getenv("BASELINE_EMBEDDING_MODEL")
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not model:
-        raise EnvironmentError("BASELINE_EMBEDDING_MODEL is required")
-    if not api_key:
-        raise EnvironmentError("OPENAI_API_KEY is required")
-    base_url = os.getenv("OPENAI_BASE_URL")
+    with _embedder_lock:
+        if _embedder is not None:   # re-check inside lock
+            return _embedder
+        model = os.getenv("BASELINE_EMBEDDING_MODEL")
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not model:
+            raise EnvironmentError("BASELINE_EMBEDDING_MODEL is required")
+        if not api_key:
+            raise EnvironmentError("OPENAI_API_KEY is required")
+        base_url = os.getenv("OPENAI_BASE_URL")
 
-    from openai import AsyncOpenAI
-    kwargs = {"api_key": api_key}
-    if base_url:
-        kwargs["base_url"] = base_url
-    _client = AsyncOpenAI(**kwargs)
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        _client = AsyncOpenAI(**kwargs)
 
-    async def embed(text: str) -> list[float]:
-        response = await _client.embeddings.create(model=model, input=text)
-        return response.data[0].embedding
+        async def embed(text: str) -> list[float]:
+            response = await _client.embeddings.create(model=model, input=text)
+            return response.data[0].embedding
 
-    _embedder = embed
-    return _embedder
+        _embedder = embed
+        return _embedder
