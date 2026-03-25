@@ -12,7 +12,7 @@ agents/
 │   ├── cancellation.py   # CancellableMixin — per-task cancel signals
 │   └── executor.py       # LangGraphA2AExecutor — base class for all agents
 └── echo/
-    ├── graph.py          # EchoState TypedDict + 3-node LangGraph
+    ├── graph.py          # EchoState TypedDict + 4-node LangGraph
     ├── executor.py       # EchoAgentExecutor (extends base executor)
     └── server.py         # FastAPI A2A server, AgentCard, uvicorn entrypoint
 ```
@@ -72,16 +72,17 @@ class SummariserAgentExecutor(LangGraphA2AExecutor):
 
 ## Echo Agent
 
-The Echo Agent is the reference implementation. Its graph has three nodes:
+The Echo Agent is the reference implementation. Its graph has four nodes:
 
 ```
-receive ──► process ──► respond ──► END
+receive ──► process ──► forward_downstream ──► respond ──► END
 ```
 
 | Node | What it does |
 |---|---|
 | `receive` | Reads input from state, checks for cancellation |
 | `process` | Uppercases the input: `ECHO: HELLO WORLD` |
+| `forward_downstream` | Optionally forwards output to a downstream agent via A2A (no-op if `DOWNSTREAM_AGENT_URL` is unset) |
 | `respond` | Writes the final output string to state |
 
 **Agent Card** (served at `/.well-known/agent-card.json`):
