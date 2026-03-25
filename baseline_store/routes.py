@@ -153,3 +153,85 @@ async def create_delta(topic_path: str, body: DeltaCreate):
             json.dumps(body.claims_added), json.dumps(body.claims_superseded),
         )
     return dict(result)
+
+
+# ── Read endpoints ────────────────────────────────────────────────────────────
+
+@router.get("/baselines/{topic_path}/current")
+async def get_current(topic_path: str):
+    pool = await get_pgvector_pool()
+    async with pool.acquire() as conn:
+        topic = await conn.fetchrow(
+            "SELECT topic_path FROM baseline_topics WHERE topic_path = $1::ltree",
+            topic_path,
+        )
+        if topic is None:
+            raise HTTPException(status_code=404, detail=f"Topic not registered: {topic_path}")
+
+        row = await conn.fetchrow(
+            """
+            SELECT topic_path::text, version_number, narrative, citations::text, created_at::text
+            FROM baseline_versions
+            WHERE topic_path = $1::ltree
+            ORDER BY version_number DESC
+            LIMIT 1
+            """,
+            topic_path,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No versions written yet for topic: {topic_path}")
+
+    result = dict(row)
+    result["citations"] = json.loads(result["citations"])
+    return result
+
+
+@router.get("/baselines/{topic_path}/history")
+async def get_history(topic_path: str):
+    pool = await get_pgvector_pool()
+    async with pool.acquire() as conn:
+        topic = await conn.fetchrow(
+            "SELECT topic_path FROM baseline_topics WHERE topic_path = $1::ltree",
+            topic_path,
+        )
+        if topic is None:
+            raise HTTPException(status_code=404, detail=f"Topic not registered: {topic_path}")
+
+        versions = await conn.fetch(
+            """
+            SELECT version_number, narrative, citations::text, created_at::text
+            FROM baseline_versions
+            WHERE topic_path = $1::ltree
+            ORDER BY version_number DESC
+            """,
+            topic_path,
+        )
+        deltas = await conn.fetch(
+            """
+            SELECT from_version, to_version, delta_summary,
+                   claims_added::text, claims_superseded::text,
+                   article_metadata::text, created_at::text
+            FROM baseline_deltas
+            WHERE topic_path = $1::ltree
+            ORDER BY to_version DESC
+            """,
+            topic_path,
+        )
+
+    def parse_version(r):
+        d = dict(r)
+        d["citations"] = json.loads(d["citations"])
+        return d
+
+    def parse_delta(r):
+        d = dict(r)
+        d["claims_added"] = json.loads(d["claims_added"])
+        d["claims_superseded"] = json.loads(d["claims_superseded"])
+        d["article_metadata"] = json.loads(d["article_metadata"])
+        return d
+
+    return {
+        "topic_path": topic_path,
+        "versions": [parse_version(r) for r in versions],
+        "deltas": [parse_delta(r) for r in deltas],
+    }

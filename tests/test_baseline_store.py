@@ -216,3 +216,112 @@ async def test_post_deltas_to_version_not_found(client):
 
     assert resp.status_code == 422
     assert "to_version" in resp.json()["detail"]
+
+
+# ── GET /baselines/{topic_path}/current ──────────────────────────────────────
+
+async def test_get_current_happy_path(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"topic_path": "us_iran_conflict"},   # topic exists
+        {                                      # current version
+            "topic_path": "us_iran_conflict",
+            "version_number": 4,
+            "narrative": "Iran tensions remain elevated.",
+            "citations": '[{"article_id":"art1","title":"...","url":"...","source":"AP","published_at":"...","excerpt":"..."}]',
+            "created_at": "2026-03-25T09:00:00+00:00",
+        },
+    ])
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/us_iran_conflict/current")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topic_path"] == "us_iran_conflict"
+    assert body["version_number"] == 4
+    assert body["narrative"] == "Iran tensions remain elevated."
+    assert isinstance(body["citations"], list)
+
+
+async def test_get_current_topic_not_registered(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=None)   # no topic row
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/nonexistent/current")
+
+    assert resp.status_code == 404
+    assert "not registered" in resp.json()["detail"]
+
+
+async def test_get_current_registered_but_no_versions(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"topic_path": "us_iran_conflict"},   # topic exists
+        None,                                  # no version row
+    ])
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/us_iran_conflict/current")
+
+    assert resp.status_code == 404
+    assert "No versions" in resp.json()["detail"]
+
+
+# ── GET /baselines/{topic_path}/history ──────────────────────────────────────
+
+async def test_get_history_happy_path(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value={"topic_path": "us_iran_conflict"})
+    conn.fetch = AsyncMock(side_effect=[
+        [   # versions (newest first)
+            {"version_number": 2, "narrative": "v2", "citations": "[]", "created_at": "2026-03-25T10:00:00+00:00"},
+            {"version_number": 1, "narrative": "v1", "citations": "[]", "created_at": "2026-03-25T09:00:00+00:00"},
+        ],
+        [   # deltas
+            {"from_version": 1, "to_version": 2, "delta_summary": "new info",
+             "claims_added": "[]", "claims_superseded": "[]",
+             "article_metadata": "{}", "created_at": "2026-03-25T10:00:00+00:00"},
+        ],
+    ])
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/us_iran_conflict/history")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topic_path"] == "us_iran_conflict"
+    assert len(body["versions"]) == 2
+    assert body["versions"][0]["version_number"] == 2   # newest first
+    assert len(body["deltas"]) == 1
+
+
+async def test_get_history_topic_not_registered(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=None)
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/nonexistent/history")
+
+    assert resp.status_code == 404
+
+
+async def test_get_history_registered_no_versions(client):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value={"topic_path": "us_iran_conflict"})
+    conn.fetch = AsyncMock(side_effect=[[], []])   # no versions, no deltas
+    pool = make_pool(conn)
+
+    with patch("baseline_store.routes.get_pgvector_pool", AsyncMock(return_value=pool)):
+        resp = await client.get("/baselines/us_iran_conflict/history")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["versions"] == []
+    assert body["deltas"] == []
