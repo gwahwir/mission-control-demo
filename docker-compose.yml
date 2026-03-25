@@ -363,6 +363,34 @@ services:
       retries: 5
       start_period: 15s
 
+  # ── Baseline Store ────────────────────────────────────────────────────────
+  baseline-store:
+    build:
+      context: .
+      dockerfile: Dockerfile.baseline-store
+    ports:
+      - "8010:8010"
+    environment:
+      - LOG_LEVEL=INFO
+      - BASELINE_PG_DSN=postgresql://mc:mc_password@postgres:5432/missioncontrol
+      - BASELINE_EMBEDDING_MODEL=${BASELINE_EMBEDDING_MODEL}
+      - BASELINE_EMBEDDING_DIMS=${BASELINE_EMBEDDING_DIMS}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      - BASELINE_STORE_URL=http://baseline-store:8010
+    env_file: ".env"
+    networks:
+      - mc-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8010/topics').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   # ── React Dashboard ────────────────────────────────────────────────────────
   dashboard:
     build:

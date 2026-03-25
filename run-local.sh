@@ -139,7 +139,7 @@ wait_for_port $KG_PORT "Knowledge Graph Agent"
 # ── Memory Agent ────────────────────────────────────────────────────────────
 MEMORY_PORT=8009
 
-echo "[10/11] Starting Memory Agent on port $MEMORY_PORT..."
+echo "[10/12] Starting Memory Agent on port $MEMORY_PORT..."
 MEMORY_NEO4J_URL="${MEMORY_NEO4J_URL:-bolt://localhost:7687}" \
 MEMORY_NEO4J_USER="${MEMORY_NEO4J_USER:-neo4j}" \
 MEMORY_NEO4J_PASSWORD="${MEMORY_NEO4J_PASSWORD:-mc_password}" \
@@ -152,8 +152,20 @@ MEMORY_AGENT_URL="http://127.0.0.1:$MEMORY_PORT" \
 PIDS+=($!)
 wait_for_port $MEMORY_PORT "Memory Agent"
 
+# ── Baseline Store ────────────────────────────────────────────────────────────
+BASELINE_PORT=8010
+
+echo "[11/12] Starting Baseline Store on port $BASELINE_PORT..."
+BASELINE_PG_DSN="${BASELINE_PG_DSN:-postgresql://mc:mc_password@localhost:5432/missioncontrol}" \
+BASELINE_EMBEDDING_MODEL="${BASELINE_EMBEDDING_MODEL}" \
+BASELINE_EMBEDDING_DIMS="${BASELINE_EMBEDDING_DIMS}" \
+BASELINE_STORE_URL="http://127.0.0.1:$BASELINE_PORT" \
+  python -m baseline_store.server &
+PIDS+=($!)
+wait_for_port $BASELINE_PORT "Baseline Store"
+
 # ── Dashboard ───────────────────────────────────────────────
-echo "[11/11] Starting Dashboard on port $DASHBOARD_PORT..."
+echo "[12/12] Starting Dashboard on port $DASHBOARD_PORT..."
 cd dashboard
 npm run dev -- --host 2>&1 &
 PIDS+=($!)
@@ -173,6 +185,7 @@ echo "  Specialist:     http://localhost:$SPECIALIST_PORT"
 echo "  Probability:    http://localhost:$PROBABILITY_PORT"
 echo "  Knowledge Graph: http://localhost:$KG_PORT"
 echo "  Memory Agent:   http://localhost:$MEMORY_PORT"
+echo "  Baseline Store: http://localhost:$BASELINE_PORT"
 echo ""
 echo "Press Ctrl+C to stop all components."
 echo ""

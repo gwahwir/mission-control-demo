@@ -1,0 +1,11 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY baseline_store/ baseline_store/
+
+EXPOSE 8010
+CMD ["python", "-m", "baseline_store.server"]
