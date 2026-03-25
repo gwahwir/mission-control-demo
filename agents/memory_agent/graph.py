@@ -197,7 +197,7 @@ async def resolve_conflicts(
     query_vec = await embed_text(query_text)
     query_vec_str = "[" + ",".join(str(x) for x in query_vec) + "]"
 
-    async with await pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id::text, content, metadata, "
             "1 - (embedding <=> $1::vector) AS score "
@@ -260,7 +260,7 @@ async def resolve_conflicts(
                 try:
                     new_vec = await embed_text(new_content)
                     new_vec_str = "[" + ",".join(str(x) for x in new_vec) + "]"
-                    async with await pool.acquire() as conn:
+                    async with pool.acquire() as conn:
                         await conn.execute(
                             "UPDATE memories SET content = $1, embedding = $2::vector, "
                             "updated_at = now() WHERE id = $3::uuid",
@@ -272,7 +272,7 @@ async def resolve_conflicts(
 
             elif action == "DELETE":
                 try:
-                    async with await pool.acquire() as conn:
+                    async with pool.acquire() as conn:
                         await conn.execute(
                             "DELETE FROM memories WHERE id = $1::uuid", row_id
                         )
@@ -361,7 +361,7 @@ async def store_memories(
         try:
             embedding = await embed_text(content)
             embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-            async with await pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await conn.execute(
                     "INSERT INTO memories (namespace, content, embedding, metadata) "
                     "VALUES ($1, $2, $3::vector, $4::jsonb)",
@@ -416,7 +416,7 @@ async def store_memories(
         try:
             embedding = await embed_text(summary)
             embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-            async with await pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await conn.execute(
                     "INSERT INTO memories (namespace, content, embedding, metadata) "
                     "VALUES ($1, $2, $3::vector, $4::jsonb)",

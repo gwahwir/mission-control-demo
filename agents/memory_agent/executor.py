@@ -46,7 +46,7 @@ async def _search_memories(
 
     vec_str = "[" + ",".join(str(x) for x in query_vec) + "]"
     pool = await get_pgvector_pool()
-    async with await pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT content, metadata, "
             "1 - (embedding <=> $1::vector) AS score "
@@ -154,11 +154,19 @@ class MemoryAgentExecutor(LangGraphA2AExecutor):
             except json.JSONDecodeError:
                 await self._emit_status(
                     event_queue, task_id, context_id, TaskState.failed,
-                    "Input must be a JSON object with an 'operation' field.", final=True,
+                    "Input must be a JSON object. Provide 'text' to write, 'query' to search, or 'entity' to traverse.", final=True,
                 )
                 return
 
-            operation = input_json.get("operation", "")
+            # Infer operation from which fields are present
+            if input_json.get("text"):
+                operation = "write"
+            elif input_json.get("entity"):
+                operation = "traverse"
+            elif input_json.get("query"):
+                operation = "search"
+            else:
+                operation = ""
 
             if operation == "write":
                 graph_input = {
@@ -216,7 +224,7 @@ class MemoryAgentExecutor(LangGraphA2AExecutor):
             else:
                 await self._emit_status(
                     event_queue, task_id, context_id, TaskState.failed,
-                    f"Unknown operation: '{operation}'. Valid values: write, search, traverse",
+                    "Could not infer operation. Provide 'text' to write, 'query' to search, or 'entity' to traverse.",
                     final=True,
                 )
                 return

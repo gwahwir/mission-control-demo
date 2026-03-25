@@ -47,13 +47,6 @@ AGENT_PORT = 8009
 
 INPUT_FIELDS = [
     {
-        "name": "operation",
-        "label": "Operation",
-        "type": "select",
-        "options": ["write", "search", "traverse"],
-        "required": True,
-    },
-    {
         "name": "namespace",
         "label": "Namespace",
         "type": "text",

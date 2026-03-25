@@ -82,17 +82,25 @@ def get_embedder():
             raise EnvironmentError("MEMORY_EMBEDDING_MODEL is required for the memory agent")
         if not api_key:
             raise EnvironmentError("OPENAI_API_KEY is required for the memory agent")
-        from openai import AsyncOpenAI
-        kwargs: dict[str, Any] = {"api_key": api_key}
-        base_url = os.getenv("OPENAI_BASE_URL")
-        if base_url:
-            kwargs["base_url"] = base_url
-        _embedder = (AsyncOpenAI(**kwargs), model)
+        if "jina" in model:
+            from langchain_community.embeddings import JinaEmbeddings
+            _embedder = (JinaEmbeddings(model=model, jina_api_key=os.getenv("JINA_API_KEY")), model)
+        else:
+            from openai import AsyncOpenAI
+            kwargs: dict[str, Any] = {"api_key": api_key}
+            base_url = os.getenv("OPENAI_BASE_URL")
+            if base_url:
+                kwargs["base_url"] = base_url
+            _embedder = (AsyncOpenAI(**kwargs), model)
     return _embedder
 
 
 async def embed_text(text: str) -> list[float]:
     """Embed a single string and return a list of floats."""
     client, model = get_embedder()
-    response = await client.embeddings.create(input=text, model=model)
-    return response.data[0].embedding
+    if "jina" in model:
+        response = client.embed_query(text)
+        return response
+    else:
+        response = await client.embeddings.create(input=text, model=model)
+        return response.data[0].embedding
