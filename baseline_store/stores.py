@@ -82,9 +82,10 @@ async def get_pgvector_pool() -> asyncpg.Pool:
     if not dsn:
         raise EnvironmentError("BASELINE_PG_DSN is required")
     dims = _get_dims()
-    _pool = await asyncpg.create_pool(dsn)
-    async with _pool.acquire() as conn:
+    pool = await asyncpg.create_pool(dsn)
+    async with pool.acquire() as conn:
         await conn.execute(_build_ddl(dims))
+    _pool = pool
     logger.info("asyncpg pool created and DDL applied (dims=%d)", dims)
     return _pool
 
