@@ -13,8 +13,17 @@ Environment variables:
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 import uvicorn
 from a2a.server.apps.jsonrpc import A2AFastAPIApplication
@@ -77,7 +86,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Extraction Agent A2A Server", lifespan=lifespan)
     agent_url = os.getenv("EXTRACTION_AGENT_URL", os.getenv("AGENT_URL", f"http://localhost:{AGENT_PORT}"))
-    print(f"My Address is {agent_url}")
+    logger.info("Agent address: %s", agent_url)
 
     executor = ExtractionExecutor()
     task_store = InMemoryTaskStore()

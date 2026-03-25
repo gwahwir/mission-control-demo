@@ -6,9 +6,17 @@ Run with:
 
 from __future__ import annotations
 
+import logging
 import os
-
+import sys
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 import uvicorn
 from a2a.server.apps.jsonrpc import A2AFastAPIApplication

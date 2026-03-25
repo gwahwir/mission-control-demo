@@ -370,6 +370,7 @@ services:
       dockerfile: Dockerfile.baseline-store
     ports:
       - "8010:8010"
+    env_file: ".env"
     environment:
       - LOG_LEVEL=INFO
       - BASELINE_PG_DSN=postgresql://mc:mc_password@postgres:5432/missioncontrol
@@ -378,7 +379,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
       - BASELINE_STORE_URL=http://baseline-store:8010
-    env_file: ".env"
     networks:
       - mc-net
     depends_on:

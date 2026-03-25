@@ -19,9 +19,18 @@ Environment variables:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 import uvicorn
 from a2a.server.apps.jsonrpc import A2AFastAPIApplication
@@ -131,7 +140,7 @@ def _mount_specialist(app: FastAPI, config: SpecialistConfig, base_url: str) -> 
         "url": f"{base_url}/{type_id}",
     })
 
-    print(f"[specialist] Mounted {type_id} at /{type_id}/")
+    logger.info("Mounted %s at /%s/", type_id, type_id)
 
 
 @asynccontextmanager

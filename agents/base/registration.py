@@ -8,11 +8,15 @@ preserving backward compatibility with manual ``AGENT_URLS`` config.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 import httpx
 from dotenv import load_dotenv
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 async def register_with_control_plane(type_name: str, agent_url: str) -> None:
@@ -22,7 +26,7 @@ async def register_with_control_plane(type_name: str, agent_url: str) -> None:
     control plane still get registered once it comes up.
     """
     cp_url = os.getenv("CONTROL_PLANE_URL", "").rstrip("/")
-    print(f"Registering to {cp_url}")
+    logger.info("Registering %s to control plane at %s", type_name, cp_url)
     if not cp_url:
         return
 
@@ -34,11 +38,11 @@ async def register_with_control_plane(type_name: str, agent_url: str) -> None:
                     json={"type_name": type_name, "agent_url": agent_url},
                 )
                 r.raise_for_status()
-                print(f"[registration] Registered with control plane: {r.json()}")
+                logger.info("Registered with control plane: %s", r.json())
                 return
         except Exception as e:
             wait = 2 ** attempt
-            print(f"[registration] Attempt {attempt + 1} failed ({e}), retrying in {wait}s...")
+            logger.warning("Registration attempt %d failed (%s), retrying in %ds...", attempt + 1, e, wait)
             await asyncio.sleep(wait)
 
     raise RuntimeError(
@@ -60,10 +64,10 @@ async def deregister_from_control_plane(type_name: str, agent_url: str) -> None:
                     json={"type_name": type_name, "agent_url": agent_url},
                 )
                 r.raise_for_status()
-                print(f"[registration] Deregistered from control plane: {r.json()}")
+                logger.info("Deregistered from control plane: %s", r.json())
                 return
         except Exception as e:
             if attempt < 2:
                 await asyncio.sleep(1)
             else:
-                print(f"[registration] Deregistration failed ({e}), control plane will detect via health poll")
+                logger.warning("Deregistration failed (%s), control plane will detect via health poll", e)
