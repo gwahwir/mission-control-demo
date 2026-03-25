@@ -44,6 +44,7 @@ OPENAI_API_KEY=sk-... python -m agents.specialist_agent.server
 OPENAI_API_KEY=sk-... python -m agents.probability_agent.server
 python -m agents.knowledge_graph.server
 OPENAI_API_KEY=sk-... python -m agents.memory_agent.server
+python -m baseline_store.server
 
 # Run everything locally (starts control plane, all agents, and dashboard)
 bash run-local.sh
@@ -103,6 +104,7 @@ LangGraph agents wrapped with `a2a-sdk` HTTP servers. Each agent:
 | Probability (`agents/probability_agent/`) | 8007 | `probability-forecaster` | Takes concatenated specialist analyses, performs probability aggregation, disagreement detection, peripheral scanning, and generates structured briefings |
 | Knowledge Graph (`agents/knowledge_graph/`) | 8008 | `knowledge-graph` | Ingests articles/snippets into a persistent knowledge graph of entities and issues via mem0 (Neo4j + pgvector); returns structured diff + narrative |
 | Memory Agent (`agents/memory_agent/`) | 8009 | `memory-agent` | Dual-store memory agent: write (raw text → LLM extraction → pgvector + Neo4j), search (semantic), and traverse (graph walk). No mem0 dependency. |
+| Baseline Store (`baseline_store/`) | 8010 | N/A (plain FastAPI) | Deterministic storage/retrieval layer for topic baselines: versioned narratives with ltree hierarchy, pgvector semantic search, and delta log. Not an A2A agent. |
 
 Each agent has its own README.md with detailed docs.
 
@@ -135,6 +137,7 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `PROBABILITY_AGENT_URL` | Probability | `http://localhost:8007` |
 | `KNOWLEDGE_GRAPH_AGENT_URL` | Knowledge Graph | `http://localhost:8008` |
 | `MEMORY_AGENT_URL` | Memory Agent | `http://localhost:8009` |
+| `BASELINE_STORE_URL` | Baseline Store | `http://localhost:8010` |
 
 ### Shared Agent Variables
 
@@ -158,6 +161,9 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `MEMORY_PG_DSN` | None | pgvector Postgres DSN (memory agent only, required) |
 | `MEMORY_EMBEDDING_MODEL` | None | Embedding model name (memory agent only, required) |
 | `MEMORY_EMBEDDING_DIMS` | None | Vector dims — must match model, no default (memory agent only, required) |
+| `BASELINE_PG_DSN` | None | pgvector + ltree Postgres DSN (baseline store only, required) |
+| `BASELINE_EMBEDDING_MODEL` | None | Embedding model name (baseline store only, required) |
+| `BASELINE_EMBEDDING_DIMS` | None | Vector dims — must match model, no default (baseline store only, required) |
 | `LANGFUSE_PUBLIC_KEY` | None | Optional — enables Langfuse LLM tracing (all agents via `agents/base/tracing.py`) |
 | `LANGFUSE_SECRET_KEY` | None | Optional — Langfuse secret key |
 | `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Optional — Langfuse instance URL |

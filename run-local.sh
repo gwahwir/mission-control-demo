@@ -60,7 +60,7 @@ echo "=== Mission Control — Local Dev ==="
 echo ""
 
 # ── Control Plane (start first so agents can self-register) ──
-echo "[1/10] Starting Control Plane on port $CONTROL_PLANE_PORT..."
+echo "[1/12] Starting Control Plane on port $CONTROL_PLANE_PORT..."
 python -m control_plane.server &
 PIDS+=($!)
 wait_for_port $CONTROL_PLANE_PORT "Control Plane"
@@ -68,7 +68,7 @@ wait_for_port $CONTROL_PLANE_PORT "Control Plane"
 CP_URL="http://127.0.0.1:$CONTROL_PLANE_PORT"
 
 # ── Summarizer Agent ────────────────────────────────────────
-echo "[2/10] Starting Summarizer Agent on port $SUMMARIZER_PORT..."
+echo "[2/12] Starting Summarizer Agent on port $SUMMARIZER_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 SUMMARIZER_AGENT_URL="http://127.0.0.1:$SUMMARIZER_PORT" \
   python -m agents.summarizer.server &
@@ -76,7 +76,7 @@ PIDS+=($!)
 wait_for_port $SUMMARIZER_PORT "Summarizer Agent"
 
 # ── Relevancy Agent ─────────────────────────────────────────
-echo "[3/10] Starting Relevancy Agent on port $RELEVANCY_PORT..."
+echo "[3/12] Starting Relevancy Agent on port $RELEVANCY_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 RELEVANCY_AGENT_URL="http://127.0.0.1:$RELEVANCY_PORT" \
   python -m agents.relevancy.server &
@@ -84,7 +84,7 @@ PIDS+=($!)
 wait_for_port $RELEVANCY_PORT "Relevancy Agent"
 
 # ── Echo Agent ──────────────────────────────────────────────
-echo "[4/10] Starting Echo Agent on port $ECHO_PORT..."
+echo "[4/12] Starting Echo Agent on port $ECHO_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 ECHO_AGENT_URL="http://127.0.0.1:$ECHO_PORT" \
 DOWNSTREAM_AGENT_URL="http://127.0.0.1:$SUMMARIZER_PORT" \
@@ -93,7 +93,7 @@ PIDS+=($!)
 wait_for_port $ECHO_PORT "Echo Agent"
 
 # ── Extraction Agent ───────────────────────────────────────
-echo "[5/10] Starting Extraction Agent on port $EXTRACTION_PORT..."
+echo "[5/12] Starting Extraction Agent on port $EXTRACTION_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 EXTRACTION_AGENT_URL="http://127.0.0.1:$EXTRACTION_PORT" \
   python -m agents.extraction_agent.server &
@@ -101,7 +101,7 @@ PIDS+=($!)
 wait_for_port $EXTRACTION_PORT "Extraction Agent"
 
 # ── Lead Analyst Agent ─────────────────────────────────────
-echo "[6/10] Starting Lead Analyst Agent on port $LEAD_ANALYST_PORT..."
+echo "[6/12] Starting Lead Analyst Agent on port $LEAD_ANALYST_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 LEAD_ANALYST_AGENT_URL="http://127.0.0.1:$LEAD_ANALYST_PORT" \
   python -m agents.lead_analyst.server &
@@ -109,7 +109,7 @@ PIDS+=($!)
 wait_for_port $LEAD_ANALYST_PORT "Lead Analyst Agent"
 
 # ── Specialist Agent ──────────────────────────────────────────
-echo "[7/10] Starting Specialist Agent on port $SPECIALIST_PORT..."
+echo "[7/12] Starting Specialist Agent on port $SPECIALIST_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 SPECIALIST_AGENT_URL="http://127.0.0.1:$SPECIALIST_PORT" \
   python -m agents.specialist_agent.server &
@@ -117,7 +117,7 @@ PIDS+=($!)
 wait_for_port $SPECIALIST_PORT "Specialist Agent"
 
 # ── Probability Forecasting Agent ────────────────────────────
-echo "[8/10] Starting Probability Agent on port $PROBABILITY_PORT..."
+echo "[8/12] Starting Probability Agent on port $PROBABILITY_PORT..."
 CONTROL_PLANE_URL="$CP_URL" \
 PROBABILITY_AGENT_URL="http://127.0.0.1:$PROBABILITY_PORT" \
   python -m agents.probability_agent.server &
@@ -125,7 +125,7 @@ PIDS+=($!)
 wait_for_port $PROBABILITY_PORT "Probability Agent"
 
 # ── Knowledge Graph Agent ────────────────────────────────────────────
-echo "[9/10] Starting Knowledge Graph Agent on port $KG_PORT..."
+echo "[9/12] Starting Knowledge Graph Agent on port $KG_PORT..."
 MEM0_NEO4J_URL="${MEM0_NEO4J_URL:-bolt://localhost:7687}" \
 MEM0_NEO4J_USER="${MEM0_NEO4J_USER:-neo4j}" \
 MEM0_NEO4J_PASSWORD="${MEM0_NEO4J_PASSWORD:-password}" \
@@ -139,7 +139,7 @@ wait_for_port $KG_PORT "Knowledge Graph Agent"
 # ── Memory Agent ────────────────────────────────────────────────────────────
 MEMORY_PORT=8009
 
-echo "[10/11] Starting Memory Agent on port $MEMORY_PORT..."
+echo "[10/12] Starting Memory Agent on port $MEMORY_PORT..."
 MEMORY_NEO4J_URL="${MEMORY_NEO4J_URL:-bolt://localhost:7687}" \
 MEMORY_NEO4J_USER="${MEMORY_NEO4J_USER:-neo4j}" \
 MEMORY_NEO4J_PASSWORD="${MEMORY_NEO4J_PASSWORD:-mc_password}" \
@@ -152,8 +152,20 @@ MEMORY_AGENT_URL="http://127.0.0.1:$MEMORY_PORT" \
 PIDS+=($!)
 wait_for_port $MEMORY_PORT "Memory Agent"
 
+# ── Baseline Store ────────────────────────────────────────────────────────────
+BASELINE_PORT=8010
+
+echo "[11/12] Starting Baseline Store on port $BASELINE_PORT..."
+BASELINE_PG_DSN="${BASELINE_PG_DSN:-postgresql://mc:mc_password@localhost:5432/missioncontrol}" \
+BASELINE_EMBEDDING_MODEL="${BASELINE_EMBEDDING_MODEL}" \
+BASELINE_EMBEDDING_DIMS="${BASELINE_EMBEDDING_DIMS}" \
+BASELINE_STORE_URL="http://127.0.0.1:$BASELINE_PORT" \
+  python -m baseline_store.server &
+PIDS+=($!)
+wait_for_port $BASELINE_PORT "Baseline Store"
+
 # ── Dashboard ───────────────────────────────────────────────
-echo "[11/11] Starting Dashboard on port $DASHBOARD_PORT..."
+echo "[12/12] Starting Dashboard on port $DASHBOARD_PORT..."
 cd dashboard
 npm run dev -- --host 2>&1 &
 PIDS+=($!)
@@ -173,6 +185,7 @@ echo "  Specialist:     http://localhost:$SPECIALIST_PORT"
 echo "  Probability:    http://localhost:$PROBABILITY_PORT"
 echo "  Knowledge Graph: http://localhost:$KG_PORT"
 echo "  Memory Agent:   http://localhost:$MEMORY_PORT"
+echo "  Baseline Store: http://localhost:$BASELINE_PORT"
 echo ""
 echo "Press Ctrl+C to stop all components."
 echo ""
