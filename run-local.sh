@@ -136,8 +136,24 @@ KNOWLEDGE_GRAPH_AGENT_URL="http://127.0.0.1:$KG_PORT" \
 PIDS+=($!)
 wait_for_port $KG_PORT "Knowledge Graph Agent"
 
+# ── Memory Agent ────────────────────────────────────────────────────────────
+MEMORY_PORT=8009
+
+echo "[10/11] Starting Memory Agent on port $MEMORY_PORT..."
+MEMORY_NEO4J_URL="${MEMORY_NEO4J_URL:-bolt://localhost:7687}" \
+MEMORY_NEO4J_USER="${MEMORY_NEO4J_USER:-neo4j}" \
+MEMORY_NEO4J_PASSWORD="${MEMORY_NEO4J_PASSWORD:-mc_password}" \
+MEMORY_PG_DSN="${MEMORY_PG_DSN:-postgresql://mc:mc_password@localhost:5432/missioncontrol}" \
+MEMORY_EMBEDDING_MODEL="${MEMORY_EMBEDDING_MODEL}" \
+MEMORY_EMBEDDING_DIMS="${MEMORY_EMBEDDING_DIMS}" \
+CONTROL_PLANE_URL="$CP_URL" \
+MEMORY_AGENT_URL="http://127.0.0.1:$MEMORY_PORT" \
+  python -m agents.memory_agent.server &
+PIDS+=($!)
+wait_for_port $MEMORY_PORT "Memory Agent"
+
 # ── Dashboard ───────────────────────────────────────────────
-echo "[10/10] Starting Dashboard on port $DASHBOARD_PORT..."
+echo "[11/11] Starting Dashboard on port $DASHBOARD_PORT..."
 cd dashboard
 npm run dev -- --host 2>&1 &
 PIDS+=($!)
@@ -156,6 +172,7 @@ echo "  Lead Analyst:   http://localhost:$LEAD_ANALYST_PORT"
 echo "  Specialist:     http://localhost:$SPECIALIST_PORT"
 echo "  Probability:    http://localhost:$PROBABILITY_PORT"
 echo "  Knowledge Graph: http://localhost:$KG_PORT"
+echo "  Memory Agent:   http://localhost:$MEMORY_PORT"
 echo ""
 echo "Press Ctrl+C to stop all components."
 echo ""

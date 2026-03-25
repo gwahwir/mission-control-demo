@@ -43,6 +43,7 @@ python -m agents.lead_analyst.server
 OPENAI_API_KEY=sk-... python -m agents.specialist_agent.server
 OPENAI_API_KEY=sk-... python -m agents.probability_agent.server
 python -m agents.knowledge_graph.server
+OPENAI_API_KEY=sk-... python -m agents.memory_agent.server
 
 # Run everything locally (starts control plane, all agents, and dashboard)
 bash run-local.sh
@@ -101,6 +102,7 @@ LangGraph agents wrapped with `a2a-sdk` HTTP servers. Each agent:
 | Specialist (`agents/specialist_agent/`) | 8006 | per-YAML | Multi-agent-per-deployment: hosts 16 LLM specialists (2 utility + 14 analytical frameworks) from YAML configs |
 | Probability (`agents/probability_agent/`) | 8007 | `probability-forecaster` | Takes concatenated specialist analyses, performs probability aggregation, disagreement detection, peripheral scanning, and generates structured briefings |
 | Knowledge Graph (`agents/knowledge_graph/`) | 8008 | `knowledge-graph` | Ingests articles/snippets into a persistent knowledge graph of entities and issues via mem0 (Neo4j + pgvector); returns structured diff + narrative |
+| Memory Agent (`agents/memory_agent/`) | 8009 | `memory-agent` | Dual-store memory agent: write (raw text → LLM extraction → pgvector + Neo4j), search (semantic), and traverse (graph walk). No mem0 dependency. |
 
 Each agent has its own README.md with detailed docs.
 
@@ -132,6 +134,7 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `SPECIALIST_AGENT_URL` | Specialist | `http://localhost:8006` |
 | `PROBABILITY_AGENT_URL` | Probability | `http://localhost:8007` |
 | `KNOWLEDGE_GRAPH_AGENT_URL` | Knowledge Graph | `http://localhost:8008` |
+| `MEMORY_AGENT_URL` | Memory Agent | `http://localhost:8009` |
 
 ### Shared Agent Variables
 
@@ -149,6 +152,12 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `MEM0_NEO4J_USER` | None | Neo4j username (knowledge graph agent only) |
 | `MEM0_NEO4J_PASSWORD` | None | Neo4j password (knowledge graph agent only) |
 | `MEM0_PG_DSN` | None | pgvector-enabled Postgres DSN (knowledge graph agent only, separate from `DATABASE_URL`) |
+| `MEMORY_NEO4J_URL` | None | Neo4j bolt URL (memory agent only, required) |
+| `MEMORY_NEO4J_USER` | None | Neo4j username (memory agent only, required) |
+| `MEMORY_NEO4J_PASSWORD` | None | Neo4j password (memory agent only, required) |
+| `MEMORY_PG_DSN` | None | pgvector Postgres DSN (memory agent only, required) |
+| `MEMORY_EMBEDDING_MODEL` | None | Embedding model name (memory agent only, required) |
+| `MEMORY_EMBEDDING_DIMS` | None | Vector dims — must match model, no default (memory agent only, required) |
 | `LANGFUSE_PUBLIC_KEY` | None | Optional — enables Langfuse LLM tracing (all agents via `agents/base/tracing.py`) |
 | `LANGFUSE_SECRET_KEY` | None | Optional — Langfuse secret key |
 | `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Optional — Langfuse instance URL |

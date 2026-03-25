@@ -326,6 +326,43 @@ services:
       retries: 5
       start_period: 15s
 
+  # ── Memory Agent ─────────────────────────────────────────────────────────
+  memory-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.memory-agent
+    ports:
+      - "8009:8009"
+    env_file: ".env"
+    environment:
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      - CONTROL_PLANE_URL=http://control-plane:8000
+      - MEMORY_AGENT_URL=http://memory-agent:8009
+      - MEMORY_NEO4J_URL=bolt://neo4j:7687
+      - MEMORY_NEO4J_USER=neo4j
+      - MEMORY_NEO4J_PASSWORD=mc_password
+      - MEMORY_PG_DSN=postgresql://mc:mc_password@postgres:5432/missioncontrol
+      - MEMORY_EMBEDDING_MODEL=${MEMORY_EMBEDDING_MODEL}
+      - MEMORY_EMBEDDING_DIMS=${MEMORY_EMBEDDING_DIMS}
+    networks:
+      - mc-net
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8009/.well-known/agent-card.json').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   # ── React Dashboard ────────────────────────────────────────────────────────
   dashboard:
     build:
