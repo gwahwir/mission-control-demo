@@ -1,4 +1,4 @@
-name: Lead Analyst Agent C Dynamic Discovery
+name: Lead Analyst Agent C Dynamic Discovery (Local)
 description: >
   Orchestrator agent that fans out work to dynamically discovered specialist agents
   via A2A, collects their results, and returns a synthesized analysis.
