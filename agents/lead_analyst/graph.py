@@ -281,6 +281,18 @@ def _filter_online_specialists(agents: list[dict]) -> list[dict]:
     return result
 
 
+def _normalize_specialist_name(name: str) -> str:
+    """Normalize specialist name for matching: convert various dashes/hyphens to standard hyphen."""
+    import unicodedata
+    # Normalize unicode (e.g., en-dash, em-dash → hyphen)
+    normalized = unicodedata.normalize('NFKC', name)
+    # Replace various dash characters with standard hyphen-minus
+    dash_chars = ['\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015']  # various dashes
+    for dash in dash_chars:
+        normalized = normalized.replace(dash, '-')
+    return normalized.strip()
+
+
 def _validate_llm_selection(
     raw: str,
     name_to_candidate: dict[str, dict],
@@ -303,6 +315,9 @@ def _validate_llm_selection(
     if not isinstance(parsed, list):
         raise ValueError(f"Expected a JSON array, got {type(parsed).__name__}")
 
+    # Build normalized lookup: normalized_name -> original_name
+    normalized_lookup = {_normalize_specialist_name(k): k for k in name_to_candidate.keys()}
+
     valid: list[dict] = []
     for i, item in enumerate(parsed):
         if not isinstance(item, dict):
@@ -313,9 +328,18 @@ def _validate_llm_selection(
             raise ValueError(f"Item {i} is missing a non-empty 'name'")
         if not reasoning:
             raise ValueError(f"Item {i} ({name!r}) is missing a non-empty 'reasoning'")
-        if name not in name_to_candidate:
-            raise ValueError(f"Item {i} references unknown specialist {name!r}")
-        valid.append(item)
+
+        # Try normalized matching first
+        normalized_name = _normalize_specialist_name(name)
+        if normalized_name in normalized_lookup:
+            # Replace with canonical name
+            item["name"] = normalized_lookup[normalized_name]
+            valid.append(item)
+        elif name in name_to_candidate:
+            # Exact match (shouldn't happen if normalization worked, but safe fallback)
+            valid.append(item)
+        else:
+            raise ValueError(f"Item {i} references unknown specialist {name!r} (normalized: {normalized_name!r})")
 
     if len(valid) < min_specialists:
         raise ValueError(
