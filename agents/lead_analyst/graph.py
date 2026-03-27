@@ -549,7 +549,7 @@ async def call_peripheral_scan(
         if not text.startswith("[Error")
     ])
 
-    peripheral_input = f"""
+    text_content = f"""
 {state["input"]}
 
 ---
@@ -572,6 +572,12 @@ Apply peripheral scan methodology to identify what domain specialists missed:
 
 Your findings will be integrated into the aggregated consensus, so focus on HIGH-SIGNAL insights that would materially change the analysis.
 """
+
+    # Wrap as JSON with separate fields (consistent with call_specialist pattern)
+    peripheral_input = json.dumps({
+        "text": text_content,
+        "key_questions": state.get("key_questions", ""),
+    })
 
     # TODO: Make specialist agent URL configurable via env var or discovery
     specialist_agent_url = os.getenv("SPECIALIST_AGENT_URL", "http://specialist-agent:8006")
@@ -604,7 +610,7 @@ async def call_ach_red_team(
 
     context_id = config["configurable"].get("context_id")
 
-    ach_input = f"""
+    text_content = f"""
 ## AGGREGATED CONSENSUS TO CHALLENGE:
 
 {state["aggregated_consensus"]}
@@ -632,6 +638,12 @@ Apply ACH (Analysis of Competing Hypotheses) methodology to challenge the consen
 
 Be adversarial. Your job is to find flaws in both the consensus AND the framing of the questions.
 """
+
+    # Wrap as JSON with separate fields (consistent with call_specialist pattern)
+    ach_input = json.dumps({
+        "text": text_content,
+        "key_questions": state.get("key_questions", ""),
+    })
 
     # TODO: Make specialist agent URL configurable
     specialist_agent_url = os.getenv("SPECIALIST_AGENT_URL", "http://specialist-agent:8006")
@@ -668,8 +680,8 @@ async def call_baseline_comparison(
         # No baselines provided - skip comparison
         return {"baseline_comparison": ""}
 
-    # Build comparison input with formatted sections including ACH context
-    comparison_input = f"""## BASELINE ASSESSMENTS:
+    # Build comparison input as structured text with all context sections
+    text_content = f"""## BASELINE ASSESSMENTS:
 
 {baselines}
 
@@ -711,6 +723,13 @@ Compare the new analysis against the baseline assessments. Use ACH insights to c
 Provide structured JSON output as specified, with confidence indicators where ACH creates uncertainty.
 """
 
+    # Wrap as JSON with separate fields (consistent with call_specialist pattern)
+    comparison_input = json.dumps({
+        "text": text_content,
+        "baselines": baselines,
+        "key_questions": state.get("key_questions", ""),
+    })
+
     specialist_agent_url = os.getenv("SPECIALIST_AGENT_URL", "http://specialist-agent:8006")
     baseline_comparison_url = f"{specialist_agent_url}/baseline-comparison"
 
@@ -744,12 +763,17 @@ async def final_synthesis(
     if not api_key:
         parts = [state["aggregated_consensus"]]
         if state.get("ach_analysis"):
-            parts.append(f"\n\n---\n\n## APPENDIX A: ACH RED TEAM CHALLENGE (Raw Output)\n\n{state['ach_analysis']}")
+            ach_formatted = _format_specialist_output(state["ach_analysis"], "ACH Red Team Challenge")
+            parts.append(f"\n\n---\n\n## APPENDIX A: ACH RED TEAM CHALLENGE\n\n{ach_formatted}")
         if state.get("baseline_comparison") and not state["baseline_comparison"].startswith("[Error"):
-            parts.append(f"\n\n---\n\n## APPENDIX B: BASELINE CHANGE ANALYSIS (Raw Output)\n\n{state['baseline_comparison']}")
+            baseline_formatted = _format_specialist_output(state["baseline_comparison"], "Baseline Change Analysis")
+            parts.append(f"\n\n---\n\n## APPENDIX B: BASELINE CHANGE ANALYSIS\n\n{baseline_formatted}")
         return {"output": "".join(parts)}
 
     # Use LLM to integrate ACH challenges + baseline comparison into balanced assessment
+    # Format ACH for readability in the prompt
+    ach_formatted_for_llm = _format_specialist_output(state["ach_analysis"], "ACH Red Team Challenge")
+
     synthesis_prompt = f"""
 You are producing a final intelligence assessment that integrates red team challenges.
 
@@ -757,14 +781,15 @@ You are producing a final intelligence assessment that integrates red team chall
 {state["aggregated_consensus"]}
 
 ## ACH RED TEAM CHALLENGE:
-{state["ach_analysis"]}
+{ach_formatted_for_llm}
 """
 
-    # Add baseline comparison section if available
+    # Add baseline comparison section if available (formatted for readability)
     if state.get("baseline_comparison") and not state["baseline_comparison"].startswith("[Error"):
+        baseline_formatted_for_llm = _format_specialist_output(state["baseline_comparison"], "Baseline Change Analysis")
         synthesis_prompt += f"""
 ## BASELINE CHANGE ANALYSIS:
-{state["baseline_comparison"]}
+{baseline_formatted_for_llm}
 
 **Integration Note:** The baseline comparison identifies how this analysis differs from prior assessments. Incorporate key changes (confirmed/challenged/updated) into your final synthesis. Highlight where confidence has increased or decreased relative to prior assessment.
 """
@@ -812,25 +837,27 @@ Use markdown formatting with clear section headers.
         )
         synthesis_output = resp.choices[0].message.content or ""
 
-        # Append raw ACH and baseline comparison outputs for reference
+        # Append formatted ACH and baseline comparison outputs for reference
         appendix_parts = []
 
         if state.get("ach_analysis"):
+            ach_formatted = _format_specialist_output(state["ach_analysis"], "ACH Red Team Analysis")
             appendix_parts.append(f"""
 ---
 
-## APPENDIX A: ACH Red Team Analysis (Raw Output)
+## APPENDIX A: ACH Red Team Analysis
 
-{state["ach_analysis"]}
+{ach_formatted}
 """)
 
         if state.get("baseline_comparison") and not state["baseline_comparison"].startswith("[Error"):
+            baseline_formatted = _format_specialist_output(state["baseline_comparison"], "Baseline Comparison Analysis")
             appendix_parts.append(f"""
 ---
 
-## APPENDIX B: Baseline Comparison Analysis (Raw Output)
+## APPENDIX B: Baseline Comparison Analysis
 
-{state["baseline_comparison"]}
+{baseline_formatted}
 """)
 
         # Combine synthesis + appendices
@@ -841,12 +868,14 @@ Use markdown formatting with clear section headers.
         return {"output": full_output}
     except Exception as exc:
         logger.error("Final synthesis LLM failed task_id=%s: %s", task_id, exc)
-        # Fallback: concatenate all components
+        # Fallback: concatenate all components with formatting
         parts = [state['aggregated_consensus']]
         if state.get("ach_analysis"):
-            parts.append(f"\n\n---\n\n## ACH CHALLENGES:\n{state['ach_analysis']}")
+            ach_formatted = _format_specialist_output(state["ach_analysis"], "ACH Challenges")
+            parts.append(f"\n\n---\n\n## ACH CHALLENGES:\n{ach_formatted}")
         if state.get("baseline_comparison") and not state["baseline_comparison"].startswith("[Error"):
-            parts.append(f"\n\n---\n\n## BASELINE COMPARISON:\n{state['baseline_comparison']}")
+            baseline_formatted = _format_specialist_output(state["baseline_comparison"], "Baseline Comparison")
+            parts.append(f"\n\n---\n\n## BASELINE COMPARISON:\n{baseline_formatted}")
         return {"output": "".join(parts)}
 
 
@@ -859,6 +888,123 @@ def receive(state: LeadAnalystState, config: RunnableConfig) -> dict[str, Any]:
     task_id = config["configurable"]["task_id"]
     executor.check_cancelled(task_id)
     return {"results": [], "selection_reasoning": {}}
+
+
+def _format_value(value: Any, indent: int = 0) -> list[str]:
+    """Recursively format a JSON value into markdown lines with proper indentation."""
+    prefix = "  " * indent
+
+    if isinstance(value, dict):
+        # Format nested dictionary as subsections
+        lines = []
+        for key, val in value.items():
+            # Convert snake_case to Title Case for headers
+            header = key.replace("_", " ").title()
+            lines.append(f"{prefix}*{header}:*")
+            lines.extend(_format_value(val, indent + 1))
+        return lines
+
+    elif isinstance(value, list):
+        # Format list items as bullets
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                # Nested structure
+                lines.extend(_format_value(item, indent))
+            else:
+                # Simple list item
+                lines.append(f"{prefix}- {item}")
+        return lines
+
+    else:
+        # Simple scalar value
+        return [f"{prefix}{value}"]
+
+
+def _format_specialist_output(text: str, default_label: str = "Analysis") -> str:
+    """Parse and format a specialist's JSON output into readable markdown.
+
+    Dynamically handles any JSON structure without hardcoding field names.
+    Otherwise, return the raw text.
+    """
+    try:
+        analysis = json.loads(text)
+        if not isinstance(analysis, dict):
+            return text
+
+        parts = []
+
+        # Define field display order and special handling
+        # Top-level fields that should be rendered as simple key: value
+        SIMPLE_FIELDS = {
+            "framework_name": "Framework",
+            "summary": "Summary",
+            "change_magnitude": "Change Magnitude",
+            "limitations": "Limitations",
+            "confidence_level": "Confidence",
+            "pre_mortem": "Pre-Mortem Analysis",
+            "question_reframing": "Question Reframing",
+        }
+
+        # Fields that contain lists (render as bullet points)
+        LIST_FIELDS = {
+            "key_findings": "Key Findings",
+            "evidence": "Evidence",
+            "evidence_cited": "Evidence",
+            "predictions": "Predictions",
+            "alternative_hypotheses": "Alternative Hypotheses",
+            "disconfirming_evidence": "Disconfirming Evidence",
+            "recommended_actions": "Recommended Actions",
+            "key_deltas": "Key Deltas",
+        }
+
+        # Fields that contain nested structures (render recursively)
+        NESTED_FIELDS = {
+            "changes": "Changes from Baseline",
+            "baseline_changes": "Changes from Baseline",
+            "confidence_assessment": "Confidence Assessment",
+        }
+
+        # Render fields in order: simple → lists → nested → remaining
+        rendered_keys = set()
+
+        # 1. Simple fields first
+        for key, label in SIMPLE_FIELDS.items():
+            if key in analysis:
+                parts.append(f"**{label}:** {analysis[key]}")
+                parts.append("")
+                rendered_keys.add(key)
+
+        # 2. List fields
+        for key, label in LIST_FIELDS.items():
+            if key in analysis and analysis[key]:
+                parts.append(f"**{label}:**")
+                for item in analysis[key]:
+                    parts.append(f"- {item}")
+                parts.append("")
+                rendered_keys.add(key)
+
+        # 3. Nested structured fields
+        for key, label in NESTED_FIELDS.items():
+            if key in analysis and analysis[key]:
+                parts.append(f"**{label}:**")
+                parts.extend(_format_value(analysis[key], indent=0))
+                parts.append("")
+                rendered_keys.add(key)
+
+        # 4. Any remaining fields not explicitly handled (catch-all)
+        for key, value in analysis.items():
+            if key not in rendered_keys:
+                header = key.replace("_", " ").title()
+                parts.append(f"**{header}:**")
+                parts.extend(_format_value(value, indent=0))
+                parts.append("")
+
+        return "\n".join(parts) if parts else text
+
+    except (json.JSONDecodeError, TypeError, KeyError) as e:
+        # Not valid JSON or unexpected structure - return raw text
+        return text
 
 
 def _build_aggregation_prompt(

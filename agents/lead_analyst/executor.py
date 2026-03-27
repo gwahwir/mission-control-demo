@@ -25,17 +25,36 @@ class LeadAnalystExecutor(LangGraphA2AExecutor):
 
     def prepare_input(self, context: RequestContext) -> dict[str, Any]:
         """Extract structured input from A2A message metadata."""
-        user_text = context.get_user_input() or ""
+        import json
 
-        # Extract from metadata if available
+        user_input = context.get_user_input() or ""
+
+        # Try to parse user input as JSON (dashboard sends structured data)
+        text = ""
         baselines = ""
         key_questions = ""
+
+        try:
+            data = json.loads(user_input)
+            if isinstance(data, dict):
+                text = data.get("text", "")
+                baselines = data.get("baselines", "")
+                key_questions = data.get("key_questions", "")
+            else:
+                text = user_input
+        except (json.JSONDecodeError, ValueError):
+            # Not JSON - treat as plain text
+            text = user_input
+
+        # Also check metadata (fallback or additional source)
         if context.message and context.message.metadata:
-            baselines = context.message.metadata.get("baselines", "")
-            key_questions = context.message.metadata.get("keyQuestions", "")
+            if not baselines:
+                baselines = context.message.metadata.get("baselines", "")
+            if not key_questions:
+                key_questions = context.message.metadata.get("keyQuestions", "")
 
         return {
-            "input": user_text,
+            "input": text,
             "baselines": baselines,
             "key_questions": key_questions,
         }
