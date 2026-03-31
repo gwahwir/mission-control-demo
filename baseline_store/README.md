@@ -9,10 +9,17 @@ Baseline Store is a deterministic storage and retrieval layer for topic baseline
 Set the required environment variables and start the server:
 
 ```bash
+# With an OpenAI-compatible embedding model:
 export BASELINE_PG_DSN="postgresql://user:pass@localhost:5432/baselines"
 export BASELINE_EMBEDDING_MODEL="text-embedding-3-small"
 export BASELINE_EMBEDDING_DIMS="1536"
 export OPENAI_API_KEY="sk-..."
+
+# With a Jina embedding model (JINA_API_KEY used instead of OPENAI_API_KEY):
+export BASELINE_PG_DSN="postgresql://user:pass@localhost:5432/baselines"
+export BASELINE_EMBEDDING_MODEL="jina-embeddings-v5-text-small"
+export BASELINE_EMBEDDING_DIMS="1024"
+export JINA_API_KEY="jina_..."
 
 python -m baseline_store.server
 # Server listens on http://0.0.0.0:8010 by default
@@ -40,7 +47,8 @@ The service will create the required PostgreSQL tables (with ltree and pgvector 
 | `BASELINE_PG_DSN` | Yes | — | pgvector + ltree enabled Postgres DSN |
 | `BASELINE_EMBEDDING_MODEL` | Yes | — | Embedding model name (e.g. `text-embedding-3-small`) |
 | `BASELINE_EMBEDDING_DIMS` | Yes | — | Vector dimensions; must match the model's output size |
-| `OPENAI_API_KEY` | Yes | — | Used for embedding API calls |
+| `OPENAI_API_KEY` | Conditional | — | Required when `BASELINE_EMBEDDING_MODEL` does not contain `"jina"` |
+| `JINA_API_KEY` | Conditional | — | Required when `BASELINE_EMBEDDING_MODEL` contains `"jina"` (e.g. `jina-embeddings-v5-text-small`) |
 | `OPENAI_BASE_URL` | No | OpenAI default | Custom OpenAI-compatible base URL |
 | `BASELINE_PORT` | No | `8010` | Port the server listens on |
 | `LOG_LEVEL` | No | `INFO` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |

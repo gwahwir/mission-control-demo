@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 import asyncpg
 from openai import AsyncOpenAI
+from langchain_community.embeddings import JinaEmbeddings
 
 logger = logging.getLogger(__name__)
 
@@ -137,11 +138,18 @@ def get_embedder() -> Callable:
         kwargs = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
-        _client = AsyncOpenAI(**kwargs)
+        if "jina" in model:
+            _client = AsyncOpenAI(**kwargs)
+        else:
+            _client = JinaEmbeddings(model_name=model, jina_api_key=api_key)
 
         async def embed(text: str) -> list[float]:
-            response = await _client.embeddings.create(model=model, input=text)
-            return response.data[0].embedding
+            if "jina" in model:
+                response = _client.embed_query(text=text)
+                return response
+            else:
+                response = await _client.embeddings.create(model=model, input=text)
+                return response.data[0].embedding
 
         _embedder = embed
         return _embedder
