@@ -25,8 +25,35 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_DESCRIPTION = """
+Deterministic storage and retrieval layer for **topic baselines** — versioned narrative snapshots
+of what is currently understood to be true about a subject.
+
+## Intended use by agents
+
+1. **Before analysis** — call `GET /baselines/{topic}/current` to retrieve the established baseline
+   so the analysis focuses on what has *changed*, not re-deriving known facts.
+2. **After analysis** — call `POST /baselines/{topic}/versions` to persist the updated narrative,
+   then `POST /baselines/{topic}/deltas` to record what changed and why.
+3. **Cross-domain discovery** — call `GET /baselines/similar?query=...` to find semantically related
+   topics across the full knowledge base.
+4. **Multi-topic context** — call `GET /baselines/{topic}/rollup` to fetch current baselines for all
+   sub-topics under a parent path in one request.
+
+## Topic paths
+
+Topics use dot-separated `ltree` format: `geo`, `geo.middle_east`, `geo.middle_east.iran`.
+Each segment must be registered via `POST /topics` before baselines can be written for it.
+"""
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Baseline Store", lifespan=lifespan)
+    app = FastAPI(
+        title="Baseline Store",
+        description=_DESCRIPTION,
+        version="1.0.0",
+        lifespan=lifespan,
+    )
     app.include_router(router)
     return app
 

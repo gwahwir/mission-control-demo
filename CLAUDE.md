@@ -164,6 +164,7 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 | `BASELINE_PG_DSN` | None | pgvector + ltree Postgres DSN (baseline store only, required) |
 | `BASELINE_EMBEDDING_MODEL` | None | Embedding model name (baseline store only, required) |
 | `BASELINE_EMBEDDING_DIMS` | None | Vector dims — must match model, no default (baseline store only, required) |
+| `BASELINE_PORT` | `8010` | Baseline store listen port |
 | `LANGFUSE_PUBLIC_KEY` | None | Optional — enables Langfuse LLM tracing (all agents via `agents/base/tracing.py`) |
 | `LANGFUSE_SECRET_KEY` | None | Optional — Langfuse secret key |
 | `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Optional — Langfuse instance URL |
@@ -171,6 +172,15 @@ Each agent reads its own specific env var for its externally-reachable URL, fall
 ## Tests
 
 Tests live in `tests/` and use `pytest-asyncio` (all tests are async by default via `asyncio_mode = auto`). A2A HTTP calls are mocked with `pytest-httpx` — no real agent process is needed. `conftest.py` provides fixtures for in-memory task store, broker, registry (with one fake echo agent), and an async HTTP client. Use `wait_for_task()` from conftest to poll until a task reaches a terminal state, since dispatch is async (202).
+
+## Design Docs
+
+Implementation plans and feature specs live in `docs/superpowers/plans/` and `docs/superpowers/specs/`. Check these before implementing major features — they capture architecture decisions, planned file structures, and ordered task breakdowns.
+
+Key planned-but-not-yet-implemented features (as of 2026-03-31):
+- **Auth / rate limiting / circuit breaker / task TTL** — see `docs/superpowers/plans/2026-03-31-agent-harness-production-hardening.md`
+- **Output schema validation per agent** — see `docs/superpowers/specs/2026-03-31-output-schema-validation-design.md`; `output_schema.json` files do not exist yet
+- `INPUT_REQUIRED` task state is defined in `TaskState` enum but not handled — see `control_plane/routes.py:211` TODO
 
 ## Adding a New Agent
 

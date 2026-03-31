@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 import asyncpg
 from openai import AsyncOpenAI
+from langchain_community.embeddings import JinaEmbeddings
 
 logger = logging.getLogger(__name__)
 
@@ -124,21 +125,31 @@ def get_embedder() -> Callable:
         if _embedder is not None:   # re-check inside lock
             return _embedder
         model = os.getenv("BASELINE_EMBEDDING_MODEL")
-        api_key = os.getenv("OPENAI_API_KEY")
+        if "jina" in model:
+            api_key = os.getenv("JINA_API_KEY")
+        else:
+            api_key = os.getenv("OPENAI_API_KEY")
         if not model:
             raise EnvironmentError("BASELINE_EMBEDDING_MODEL is required")
         if not api_key:
-            raise EnvironmentError("OPENAI_API_KEY is required")
+            raise EnvironmentError("OPENAI_API_KEY or JINA_API_KEY is required")
         base_url = os.getenv("OPENAI_BASE_URL")
 
         kwargs = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
-        _client = AsyncOpenAI(**kwargs)
+        if "jina" in model:
+            _client = JinaEmbeddings(model_name=model, jina_api_key=api_key)
+        else:
+            _client = AsyncOpenAI(**kwargs)
 
         async def embed(text: str) -> list[float]:
-            response = await _client.embeddings.create(model=model, input=text)
-            return response.data[0].embedding
+            if "jina" in model:
+                response = _client.embed_query(text=text)
+                return response
+            else:
+                response = await _client.embeddings.create(model=model, input=text)
+                return response.data[0].embedding
 
         _embedder = embed
         return _embedder
