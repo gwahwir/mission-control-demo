@@ -139,9 +139,9 @@ def get_embedder() -> Callable:
         if base_url:
             kwargs["base_url"] = base_url
         if "jina" in model:
-            _client = AsyncOpenAI(**kwargs)
-        else:
             _client = JinaEmbeddings(model_name=model, jina_api_key=api_key)
+        else:
+            _client = AsyncOpenAI(**kwargs)
 
         async def embed(text: str) -> list[float]:
             if "jina" in model:
