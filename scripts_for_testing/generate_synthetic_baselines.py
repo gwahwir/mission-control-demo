@@ -112,3 +112,26 @@ def parse_args() -> argparse.Namespace:
         help="Print generated plan without writing to the store",
     )
     return parser.parse_args()
+
+
+async def generate_plan(seed: str, n_topics: int, n_versions: int, model: str) -> dict[str, Any]:
+    client = AsyncOpenAI()
+    prompt = build_prompt(seed, n_topics, n_versions)
+    response = await client.chat.completions.create(
+        model=model,
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return json.loads(response.choices[0].message.content)
+
+
+def print_plan_summary(plan: dict[str, Any]) -> None:
+    topics = plan["topics"]
+    print(f"\nGenerated plan: {len(topics)} topic(s)")
+    for t in topics:
+        versions = t["versions"]
+        print(f"  {t['topic_path']} ({t['display_name']}) — {len(versions)} version(s)")
+        for i, v in enumerate(versions, 1):
+            snippet = v["narrative"][:80].replace("\n", " ")
+            print(f"    v{i}: {snippet}...")
+    print()
