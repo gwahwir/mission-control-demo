@@ -43,7 +43,8 @@
       "Read(//c//**)",
       "Skill(commit-commands:commit)",
       "WebSearch",
-      "Skill(claude-md-management:revise-claude-md)"
+      "Skill(claude-md-management:revise-claude-md)",
+      "Bash(python3:*)"
     ]
   }
 }

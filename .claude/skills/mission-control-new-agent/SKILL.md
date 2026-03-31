@@ -1,6 +1,6 @@
 ---
 name: mission-control-new-agent
-description: Use when adding a new LangGraph A2A agent to the mission-control codebase at C:\Projects\mission-control. Covers all required files, patterns, and registration steps.
+description: Use when adding a new LangGraph A2A agent to the mission-control codebase at mission-control. Covers all required files, patterns, and registration steps.
 ---
 
 # Mission Control: Adding a New Agent
