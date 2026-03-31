@@ -193,3 +193,33 @@ async def write_plan(plan: dict[str, Any], baseline_url: str) -> tuple[int, int]
                 prev_version_number = version_number
 
     return topics_written, versions_written
+
+
+async def main() -> None:
+    args = parse_args()
+
+    seed = args.seed
+    if not seed:
+        if sys.stdin.isatty():
+            print("Error: provide --seed or pipe text via stdin", file=sys.stderr)
+            sys.exit(1)
+        seed = sys.stdin.read().strip()
+    if not seed:
+        print("Error: seed paragraph is empty", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Generating plan from seed ({len(seed)} chars) using {args.model}...")
+    plan = await generate_plan(seed, args.topics, args.versions_per_topic, args.model)
+    print_plan_summary(plan)
+
+    if args.dry_run:
+        print("[dry-run] Skipping writes.")
+        return
+
+    print(f"Writing to {args.baseline_url}...")
+    topics_written, versions_written = await write_plan(plan, args.baseline_url)
+    print(f"\nDone. {topics_written} topic(s) registered, {versions_written} version(s) written.")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
