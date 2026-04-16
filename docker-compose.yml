@@ -311,6 +311,33 @@ services:
       retries: 5
       start_period: 15s
 
+  # ── Wiki Agent ────────────────────────────────────────────────────────────────
+  wiki-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.wiki_agent
+    ports:
+      - "8011:8011"
+    env_file: ".env"
+    environment:
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      - CONTROL_PLANE_URL=http://control-plane:8000
+      - WIKI_AGENT_URL=http://wiki-agent:8011
+    networks:
+      - mc-net
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8011/.well-known/agent-card.json').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # ── React Dashboard ────────────────────────────────────────────────────────
   dashboard:
     build:
