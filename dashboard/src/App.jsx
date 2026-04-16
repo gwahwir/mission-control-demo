@@ -17,6 +17,10 @@ import TaskHistory from "./components/TaskHistory";
 import TaskGraphModal from "./components/TaskGraphModal";
 import AgentDetailDrawer from "./components/AgentDetailDrawer";
 import AgentFlowDiagram from "./components/AgentFlowDiagram";
+import AnalystFlowPage from "./components/AnalystFlowPage/AnalystFlowPage";
+import BaselinesPage from "./components/BaselinesPage/BaselinesPage";
+import CommsPage from "./components/CommsPage/CommsPage";
+import PipelinePage from "./components/PipelinePage/PipelinePage";
 import { fetchAgents, fetchGraph, fetchTasks, deleteTask, deleteAllTasks } from "./hooks/useApi";
 
 function UtcClock() {
@@ -42,6 +46,9 @@ function App() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [tab, setTab] = useState("flow");
+  const [analystTask, setAnalystTask] = useState(null);   // {taskId, agentId}
+  const [analystTaskState, setAnalystTaskState] = useState(null);
+  const [baselinesRefreshKey, setBaselinesRefreshKey] = useState(0);
 
   const loadAgents = useCallback(() => {
     fetchAgents().then(setAgents).catch(() => {});
@@ -196,16 +203,21 @@ function App() {
 
       <AppShell.Main>
         <Box maw={2000} mx="auto">
-          <Box mb="xl">
-            <TaskLauncher agents={agents} graphData={graphData} onTaskCreated={handleTaskCreated} />
-          </Box>
-
           <Tabs value={tab} onChange={setTab}>
             <Tabs.List mb="md">
+              <Tabs.Tab value="dispatch">[00] DISPATCH TASK</Tabs.Tab>
               <Tabs.Tab value="flow">[01] TOPOLOGY</Tabs.Tab>
               <Tabs.Tab value="board">[02] TASK BOARD</Tabs.Tab>
               <Tabs.Tab value="history">[03] HISTORY</Tabs.Tab>
+              <Tabs.Tab value="pipeline">[04] PIPELINE</Tabs.Tab>
+              <Tabs.Tab value="comms">[05] COMMS</Tabs.Tab>
+              <Tabs.Tab value="analyst">[06] ANALYST FLOW</Tabs.Tab>
+              <Tabs.Tab value="baselines">[07] BASELINES</Tabs.Tab>
             </Tabs.List>
+
+            <Tabs.Panel value="dispatch">
+              <TaskLauncher agents={agents} graphData={graphData} onTaskCreated={handleTaskCreated} />
+            </Tabs.Panel>
 
             <Tabs.Panel value="flow">
               <AgentFlowDiagram graphData={graphData} />
@@ -222,6 +234,33 @@ function App() {
                 onDeleteTask={handleDeleteTask}
                 onClearAll={handleClearAll}
               />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="pipeline">
+              <PipelinePage
+                agents={agents}
+                onAnalystTaskStarted={(taskId, agentId) => {
+                  setAnalystTask({ taskId, agentId });
+                  setAnalystTaskState(null);
+                }}
+                onAnalystTaskState={setAnalystTaskState}
+                onBaselineWritten={() => setBaselinesRefreshKey((k) => k + 1)}
+              />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="comms">
+              <CommsPage analystTask={analystTask} taskState={analystTaskState} />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="analyst">
+              <AnalystFlowPage
+                agents={agents}
+                onBaselineWritten={() => setBaselinesRefreshKey((k) => k + 1)}
+              />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="baselines">
+              <BaselinesPage refreshKey={baselinesRefreshKey} />
             </Tabs.Panel>
           </Tabs>
         </Box>

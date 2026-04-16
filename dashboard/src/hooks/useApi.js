@@ -74,3 +74,46 @@ export function subscribeToTask(taskId, onMessage) {
   ws.onerror = () => ws.close();
   return () => ws.close();
 }
+
+export async function fetchTask(agentId, taskId) {
+  const res = await fetch(`${API_BASE}/agents/${agentId}/tasks/${taskId}`);
+  if (!res.ok) throw new Error("Failed to fetch task");
+  return res.json();
+}
+
+export async function fetchBaseline(topicPath) {
+  const res = await fetch(`${API_BASE}/baselines/${topicPath}/current`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to fetch baseline");
+  return res.json();
+}
+
+export async function ensureTopicRegistered(topicPath, displayName) {
+  const res = await fetch(`${API_BASE}/topics`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic_path: topicPath, display_name: displayName || topicPath }),
+  });
+  if (!res.ok && res.status !== 409) throw new Error("Failed to register topic");
+  return res.json().catch(() => null);
+}
+
+export async function writeBaselineVersion(topicPath, narrative) {
+  const res = await fetch(`${API_BASE}/baselines/${topicPath}/versions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ narrative }),
+  });
+  if (!res.ok) throw new Error("Failed to write baseline version");
+  return res.json();
+}
+
+export async function writeBaselineDelta(topicPath, delta) {
+  const res = await fetch(`${API_BASE}/baselines/${topicPath}/deltas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(delta),
+  });
+  if (!res.ok) throw new Error("Failed to write baseline delta");
+  return res.json();
+}

@@ -12,6 +12,8 @@ export default defineConfig({
       "/tasks": "http://localhost:8000",
       "/register": "http://localhost:8000",
       "/deregister": "http://localhost:8000",
+      "/baselines": "http://localhost:8010",
+      "/topics": "http://localhost:8010",
       "/ws": {
         target: "ws://localhost:8000",
         ws: true,
