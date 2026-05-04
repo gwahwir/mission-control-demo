@@ -5,11 +5,11 @@ description: >
 
 sub_agents:
   - label: ASEAN Security Analyst
-    url: http://localhost:8006/asean-security
+    url: http://specialist:8006/asean-security
   - label: Realist IR Analyst
-    url: http://localhost:8006/realist-ir
-  - label: Taleb Antifragile Analyst
-    url: http://localhost:8006/taleb-antifragile
+    url: http://specialist:8006/realist-ir
+  - label: Black Swan Analyst
+    url: http://specialist:8006/black-swan
 
 input_fields:
   - name: text

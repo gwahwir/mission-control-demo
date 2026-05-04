@@ -29,32 +29,28 @@ function extractTextFromTask(task) {
   return "";
 }
 
-function extractUpdatedNarrative(analysisText, oldNarrative) {
+function extractSection(lines, marker) {
+  const idx = lines.findIndex((l) => l.toLowerCase().includes(marker.toLowerCase()));
+  if (idx === -1) return null;
+  const section = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    if (lines[i].startsWith("## ") && section.length) break;
+    section.push(lines[i]);
+  }
+  return section.join("\n").trim() || null;
+}
+
+function extractUpdatedNarrative(analysisText) {
   const lines = analysisText.split("\n");
-  for (const marker of ["## Updated Baseline", "## Baseline Change Summary", "## Baseline Update"]) {
-    const idx = lines.findIndex((l) => l.toLowerCase().includes(marker.toLowerCase()));
-    if (idx !== -1) {
-      const section = [];
-      for (let i = idx + 1; i < lines.length; i++) {
-        if (lines[i].startsWith("## ") && section.length) break;
-        section.push(lines[i]);
-      }
-      const text = section.join("\n").trim();
-      if (text) return text;
-    }
+  const primary = extractSection(lines, "## Primary Assessment");
+  const changes = extractSection(lines, "## Baseline Change Summary");
+  if (primary || changes) {
+    const parts = [];
+    if (primary) parts.push(`## Primary Assessment\n${primary}`);
+    if (changes) parts.push(`## Baseline Change Summary\n${changes}`);
+    return parts.join("\n\n");
   }
-  for (const marker of ["## Executive Summary", "## Primary Assessment"]) {
-    const idx = lines.findIndex((l) => l.toLowerCase().includes(marker.toLowerCase()));
-    if (idx !== -1) {
-      const section = [];
-      for (let i = idx + 1; i < lines.length; i++) {
-        if (lines[i].startsWith("## ") && section.length) break;
-        section.push(lines[i]);
-      }
-      const summary = section.join("\n").trim();
-      if (summary) return oldNarrative ? `${summary}\n\n[Prior baseline]\n${oldNarrative}` : summary;
-    }
-  }
+  // Fallback: first 3000 chars
   return analysisText.slice(0, 3000);
 }
 
@@ -272,7 +268,7 @@ export default function PipelinePage({ agents, onAnalystTaskStarted, onAnalystTa
         // ── Step 4: Write baseline ────────────────────────────────────────────
         setRunState("writing_baseline");
 
-        const newNarrative = extractUpdatedNarrative(analysisText, baseline?.narrative ?? "");
+        const newNarrative = extractUpdatedNarrative(analysisText);
         const { deltaSummary, claimsAdded, claimsSuperseded } = extractDeltaFields(analysisText);
 
         const versionResult = await writeBaselineVersion(topic, newNarrative);

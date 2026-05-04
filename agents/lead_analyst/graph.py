@@ -829,15 +829,27 @@ Produce a final assessment that:
 
 **Tone:** Balanced, acknowledges uncertainty, action-oriented.
 
-**Structure:**
-- Executive Summary (2-3 sentences, include baseline change summary if applicable)
-- Primary Assessment (consensus view)
-- Baseline Change Summary (if applicable: what changed from prior assessment)
-- Alternative Hypotheses Worth Monitoring (from ACH)
-- Key Uncertainties & Disconfirming Evidence
-- Recommended Actions
+**Structure — use these exact section headers in this order:**
 
-Use markdown formatting with clear section headers.
+## Executive Summary
+2-3 sentences covering the headline finding and any key shift from prior assessment.
+
+## Primary Assessment
+The consensus view with supporting evidence.
+
+## Baseline Change Summary
+What has changed from the prior assessment: what is confirmed, challenged, or updated. Write this as prose paragraphs only — do NOT use tables or bullet lists with columns. If no prior baseline was provided, write "No prior baseline available."
+
+## Alternative Hypotheses Worth Monitoring
+Credible alternatives identified by ACH red team analysis.
+
+## Key Uncertainties & Disconfirming Evidence
+Evidence that warrants caution or could reverse the assessment.
+
+## Recommended Actions
+Decision-relevant actions given the current assessment.
+
+Use markdown formatting. Do not add extra top-level sections beyond those listed above.
 """
 
     from langfuse.openai import AsyncOpenAI

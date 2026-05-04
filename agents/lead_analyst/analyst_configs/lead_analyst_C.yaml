@@ -5,7 +5,7 @@ description: >
   Specialists are selected autonomously based on relevance to the input.
 
 dynamic_discovery: true
-control_plane_url: http://localhost:8000
+control_plane_url: http://control-plane:8000
 min_specialists: 3
 
 input_fields:
